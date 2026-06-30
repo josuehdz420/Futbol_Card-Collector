@@ -6,6 +6,18 @@ const WC26_BASE = (typeof window !== 'undefined' && window.__API_BASE__) || 'htt
 // Liga ESPN usada como fuente de partidos del Mundial (ver server/src/config/competitions.js)
 const ESPN_WC_LEAGUE = 'fifa.world';
 
+// Rango de días hacia atrás/adelante que se consulta a la API para traer
+// histórico (resultados pasados) + próximos partidos en una sola llamada.
+const ESPN_DAYS_BACK = 30;
+const ESPN_DAYS_FORWARD = 45;
+
+function _espnDateRangeYYYYMMDD() {
+  const fmt = (d) => `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
+  const from = new Date(); from.setDate(from.getDate() - ESPN_DAYS_BACK);
+  const to   = new Date(); to.setDate(to.getDate() + ESPN_DAYS_FORWARD);
+  return { from: fmt(from), to: fmt(to) };
+}
+
 const USE_MOCK_ONLY = false;
 
 const API_STATUS = {
@@ -538,7 +550,7 @@ const API = {
   _memSet(key, data) { this._memCache[key] = { data, ts: Date.now() }; return data; },
 
   
-  _CACHE_VERSION: 'v25',
+  _CACHE_VERSION: 'v26',
 
   _lsCacheKey(key) { return `wcc_cache_${this._CACHE_VERSION}_${key}`; },
 
@@ -590,7 +602,8 @@ const API = {
 
     // GET /get/games -> lista de partidos del Mundial (todas las ligas soportadas)
     if (endpoint === '/get/games') {
-      const data = await this._fetch(`${WC26_BASE}/matches?league=${ESPN_WC_LEAGUE}`);
+      const { from, to } = _espnDateRangeYYYYMMDD();
+      const data = await this._fetch(`${WC26_BASE}/matches?league=${ESPN_WC_LEAGUE}&from=${from}&to=${to}`);
       if (!data || !data.success) return null;
       return (data.data || []).map(_espnToLegacyGame).filter(Boolean);
     }

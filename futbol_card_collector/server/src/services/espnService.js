@@ -125,6 +125,100 @@ async function getScoreboard(leagueId = DEFAULT_LEAGUE, dateStr = null) {
 }
 
 /**
+ * Obtiene el scoreboard de una liga para un RANGO de fechas
+ * (ESPN soporta ?dates=YYYYMMDD-YYYYMMDD). Esto permite traer partidos
+ * de días pasados (resultados/historial) junto con los futuros en una
+ * sola consulta. Se cachea por rango.
+ */
+async function getScoreboardRange(leagueId = DEFAULT_LEAGUE, fromStr, toStr) {
+  if (!isValidLeague(leagueId)) {
+    throw new ApiError(`Liga no soportada: ${leagueId}`, 400);
+  }
+  if (!fromStr || !toStr) {
+    throw new ApiError("Se requieren los parámetros 'from' y 'to' (YYYYMMDD)", 400);
+  }
+
+  const cacheKey = `scoreboard:${leagueId}:${fromStr}-${toStr}`;
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+
+  const url = `${BASE_URL}/${leagueId}/scoreboard?dates=${fromStr}-${toStr}`;
+  const data = await safeGet(url);
+  let events = data.events || [];
+
+  // Algunos endpoints de ESPN ignoran rangos demasiado amplios y devuelven
+  // solo el día actual; si detectamos pocos resultados, reforzamos con
+  // requests día por día para no perder histórico/futuro.
+  if (events.length === 0) {
+    const days = _enumerateDates(fromStr, toStr);
+    const results = await Promise.allSettled(
+      days.map((d) => safeGet(`${BASE_URL}/${leagueId}/scoreboard?dates=${d}`))
+    );
+    events = results
+      .filter((r) => r.status === "fulfilled")
+      .flatMap((r) => r.value.events || []);
+  }
+
+  // Deduplicar por id (por si el rango y el fallback día-a-día se solapan)
+  const seen = new Set();
+  const matches = [];
+  for (const ev of events) {
+    if (seen.has(ev.id)) continue;
+    seen.add(ev.id);
+    matches.push(normalizeEvent(ev, leagueId));
+  }
+
+  matches.sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  cache.set(cacheKey, matches, TTL.SCOREBOARD);
+  return matches;
+}
+
+/**
+ * Obtiene partidos de TODAS las competiciones soportadas en un rango de
+ * fechas (histórico + futuro combinado y ordenado cronológicamente).
+ */
+async function getAllMatchesRange(fromStr, toStr) {
+  const cacheKey = `matches:all:${fromStr}-${toStr}`;
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+
+  const results = await Promise.allSettled(
+    COMPETITIONS.map((c) => getScoreboardRange(c.id, fromStr, toStr))
+  );
+
+  const matches = results
+    .filter((r) => r.status === "fulfilled")
+    .flatMap((r) => r.value)
+    .sort((a, b) => new Date(a.date) - new Date(b.date));
+
+  cache.set(cacheKey, matches, TTL.SCOREBOARD);
+  return matches;
+}
+
+/**
+ * Genera un array de strings YYYYMMDD entre dos fechas (inclusive).
+ * Límite de seguridad: 60 días, para evitar loops gigantes.
+ */
+function _enumerateDates(fromStr, toStr) {
+  const parse = (s) => new Date(`${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}T00:00:00Z`);
+  const from = parse(fromStr);
+  const to = parse(toStr);
+  const days = [];
+  const cursor = new Date(from);
+  let safety = 0;
+  while (cursor <= to && safety < 60) {
+    const y = cursor.getUTCFullYear();
+    const m = String(cursor.getUTCMonth() + 1).padStart(2, "0");
+    const d = String(cursor.getUTCDate()).padStart(2, "0");
+    days.push(`${y}${m}${d}`);
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+    safety++;
+  }
+  return days;
+}
+
+/**
  * Obtiene partidos de TODAS las competiciones soportadas para una fecha
  * (o el día actual de ESPN si no se especifica).
  */
@@ -317,7 +411,9 @@ function getCompetitions() {
 
 module.exports = {
   getScoreboard,
+  getScoreboardRange,
   getAllMatches,
+  getAllMatchesRange,
   getLiveMatches,
   getMatchById,
   getStandings,
