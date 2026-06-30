@@ -1,0 +1,86 @@
+---
+// Página principal de la app — World Cup Collector UES
+//
+// Esta página actúa como "orquestador" de la pantalla principal: define el
+// documento HTML y compone los componentes de src/components/app/*.
+// Toda la lógica de negocio sigue viviendo en public/js/** (sin cambios);
+// aquí solo se organiza el MARKUP en piezas con responsabilidad única.
+
+import AppHead from '../components/app/AppHead.astro';
+import LoadingSplash from '../components/app/LoadingSplash.astro';
+import AppBanners from '../components/app/AppBanners.astro';
+import AppDrawer from '../components/app/AppDrawer.astro';
+import AppHeader from '../components/app/AppHeader.astro';
+import AppBottomNav from '../components/app/AppBottomNav.astro';
+import GlobalModals from '../components/app/GlobalModals.astro';
+import AppScripts from '../components/app/AppScripts.astro';
+import DrawerScript from '../components/app/DrawerScript.astro';
+import PwaAndDiscordScript from '../components/app/PwaAndDiscordScript.astro';
+
+import TabDashboard from '../components/app/tabs/TabDashboard.astro';
+import TabStats from '../components/app/tabs/TabStats.astro';
+import TabGacha from '../components/app/tabs/TabGacha.astro';
+import TabAlbum from '../components/app/tabs/TabAlbum.astro';
+import TabPredictions from '../components/app/tabs/TabPredictions.astro';
+import TabLive from '../components/app/tabs/TabLive.astro';
+import TabProfile from '../components/app/tabs/TabProfile.astro';
+---
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <AppHead />
+</head>
+<body>
+
+  <div id="menu-bg-video" aria-hidden="true">
+    <video
+      id="menu-bg-video-el"
+      src="/worldcup-v15b-loading-fixed/videos/menu.mp4"
+      autoplay
+      loop
+      muted
+      playsinline
+      preload="auto"
+    ></video>
+  </div>
+
+  <LoadingSplash />
+
+  <AppBanners />
+
+  <div id="screen-app" class="screen active">
+
+    <AppDrawer />
+
+    <AppHeader />
+
+    <AppBottomNav />
+
+    <main class="app-main">
+      <TabDashboard />
+      <TabStats />
+      <TabGacha />
+      <TabAlbum />
+
+      <section id="tab-battle" class="tab-section">
+      </section>
+
+      <section id="tab-exchange" class="tab-section">
+      </section>
+
+      <TabPredictions />
+      <TabLive />
+      <TabProfile />
+    </main>
+  </div>
+
+  <GlobalModals />
+
+  <AppScripts />
+
+  <DrawerScript />
+
+  <PwaAndDiscordScript />
+
+</body>
+</html>

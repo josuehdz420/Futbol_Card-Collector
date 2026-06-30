@@ -1,0 +1,152 @@
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+<meta name="color-scheme" content="dark"/>
+<meta name="theme-color" content="#080c14"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="WCC UES"/>
+<meta name="description" content="Colecciona figuritas del Mundial 2026, predice partidos y gana recompensas"/>
+<title>Fifa World Cup Coleccion — UES</title>
+
+<link rel="manifest" href="/worldcup-v15b-loading-fixed/manifest.json"/>
+<link rel="icon" type="image/png" sizes="192x192" href="/worldcup-v15b-loading-fixed/icons/icon-192.png"/>
+<link rel="apple-touch-icon" href="/worldcup-v15b-loading-fixed/icons/icon-192.png"/>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow:wght@300;400;600;700&family=Barlow+Condensed:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/worldcup-v15b-loading-fixed/css/worldcup2026-theme.css"/>
+<link rel="stylesheet" href="/worldcup-v15b-loading-fixed/css/app.css"/>
+
+<script src="https://cdn.jsdelivr.net/npm/@twemoji/api@latest/dist/twemoji.min.js" crossorigin="anonymous" is:inline></script>
+
+<style>
+  #loading-splash {
+    position: fixed;
+    inset: 0;
+    z-index: 99999;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    background: var(--bg-deep, #0a0e1a);
+  }
+  #loading-splash img.loading-ball {
+    width: 84px;
+    height: 84px;
+    border-radius: 50%;
+    object-fit: cover;
+  }
+
+  :root {
+    --bg-base:        rgba(5, 8, 18, 0.0);
+    --bg-surface:     rgba(14, 21, 32, 0.52);
+    --bg-card:        rgba(16, 24, 40, 0.58);
+    --bg-card-hover:  rgba(22, 36, 60, 0.68);
+    --bg-deep:        rgba(5, 8, 18, 0.82);
+  }
+  body { background: transparent !important; }
+  #screen-app { background: transparent !important; }
+  .app-main { background: transparent !important; }
+  .tab-section { background: transparent !important; }
+
+  .app-header {
+    background: rgba(8, 12, 20, 0.68) !important;
+    backdrop-filter: blur(14px) !important;
+    -webkit-backdrop-filter: blur(14px) !important;
+  }
+  .app-nav {
+    background: rgba(8, 12, 20, 0.68) !important;
+    backdrop-filter: blur(14px) !important;
+    -webkit-backdrop-filter: blur(14px) !important;
+  }
+  .bottom-nav {
+    background: rgba(8, 12, 20, 0.78) !important;
+    backdrop-filter: blur(14px) !important;
+    -webkit-backdrop-filter: blur(14px) !important;
+  }
+  .app-drawer {
+    background: rgba(6, 10, 20, 0.88) !important;
+    backdrop-filter: blur(18px) !important;
+    -webkit-backdrop-filter: blur(18px) !important;
+  }
+  .drawer-overlay {
+    background: rgba(0, 0, 0, 0.48) !important;
+    backdrop-filter: blur(4px) !important;
+    -webkit-backdrop-filter: blur(4px) !important;
+  }
+  .section-card, .widget-card, .card, .match-card,
+  .prediction-card, .battle-mode-card, .slot-pick-card,
+  .exchange-coin-card, .exchange-option-card, .profile-section,
+  .group-table-wrap, .minigame-card, .gacha-pity-section,
+  .live-player-wrap, .fav-chip, .header-stat, .modal-box {
+    backdrop-filter: blur(10px) !important;
+    -webkit-backdrop-filter: blur(10px) !important;
+  }
+  .stats-table-wrap {
+    backdrop-filter: blur(8px) !important;
+    -webkit-backdrop-filter: blur(8px) !important;
+  }
+  input[type="text"], input[type="password"], input[type="email"],
+  input[type="number"], input[type="search"], select, textarea {
+    background: rgba(14, 21, 32, 0.68) !important;
+    backdrop-filter: blur(6px) !important;
+    -webkit-backdrop-filter: blur(6px) !important;
+  }
+  .toast {
+    background: rgba(16, 24, 40, 0.86) !important;
+    backdrop-filter: blur(12px) !important;
+    -webkit-backdrop-filter: blur(12px) !important;
+  }
+  .modal-overlay {
+    background: rgba(0, 0, 0, 0.60) !important;
+    backdrop-filter: blur(6px) !important;
+    -webkit-backdrop-filter: blur(6px) !important;
+  }
+  #loading-splash {
+    background: rgba(5, 8, 18, 0.90) !important;
+    backdrop-filter: blur(8px) !important;
+    -webkit-backdrop-filter: blur(8px) !important;
+  }
+  .pwa-banner, .discord-banner {
+    background: rgba(16, 24, 40, 0.72) !important;
+    backdrop-filter: blur(10px) !important;
+    -webkit-backdrop-filter: blur(10px) !important;
+  }
+
+  /* ── Estadísticas — tabla y buscador translúcidos ── */
+  .stats-table-wrap {
+    background: rgba(14, 21, 32, 0.35) !important;
+    backdrop-filter: blur(10px) !important;
+    -webkit-backdrop-filter: blur(10px) !important;
+    border-radius: 8px;
+  }
+  .stats-table th {
+    background: rgba(10, 16, 28, 0.45) !important;
+  }
+  .stats-table td {
+    background: transparent !important;
+  }
+  .stats-table tbody tr:nth-child(even) td {
+    background: rgba(255, 255, 255, 0.03) !important;
+  }
+  .stats-table tr:hover td {
+    background: rgba(22, 36, 60, 0.45) !important;
+  }
+  .search-bar input {
+    background: rgba(14, 21, 32, 0.55) !important;
+    backdrop-filter: blur(8px) !important;
+    -webkit-backdrop-filter: blur(8px) !important;
+  }
+  .stab {
+    background: rgba(16, 24, 40, 0.45) !important;
+    backdrop-filter: blur(8px) !important;
+    -webkit-backdrop-filter: blur(8px) !important;
+  }
+  .group-table-wrap {
+    background: rgba(14, 21, 32, 0.35) !important;
+    backdrop-filter: blur(10px) !important;
+    -webkit-backdrop-filter: blur(10px) !important;
+  }
+</style>
