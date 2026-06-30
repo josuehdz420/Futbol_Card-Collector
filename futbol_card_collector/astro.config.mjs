@@ -1,8 +1,8 @@
 import { defineConfig } from 'astro/config';
 
 export default defineConfig({
-  site: 'https://she0909.github.io',
-  base: '/worldcup-v15b-loading-fixed',
+  site: 'https://josuehdz420.github.io',
+  base: '/Futbol_Card-Collector',
   output: 'static',
   build: {
     assets: 'assets'
