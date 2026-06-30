@@ -1,4 +1,10 @@
-const WC26_BASE = 'https://winter-thunder-a7a0.cq22003.workers.dev';
+// Nueva API backend (Node.js + Express, datos públicos de ESPN)
+// En desarrollo corre en localhost:3001 (ver /server). Se puede sobreescribir
+// definiendo window.__API_BASE__ antes de cargar este script (ej. en producción).
+const WC26_BASE = (typeof window !== 'undefined' && window.__API_BASE__) || 'http://localhost:3001';
+
+// Liga ESPN usada como fuente de partidos del Mundial (ver server/src/config/competitions.js)
+const ESPN_WC_LEAGUE = 'fifa.world';
 
 const USE_MOCK_ONLY = false;
 
@@ -368,6 +374,44 @@ function _utcToSV(utcStr) {
   return { date: `${yr}-${mo}-${da}`, time: `${hh}:${mm}` };
 }
 
+// --- Adaptador: convierte un partido normalizado por nuestra API ESPN
+// (server/src/services/espnService.js) al formato "legacy" que ya entiende
+// _mapWC26Match más abajo (mismo formato que usaba la API vieja). Así no
+// hay que tocar el resto de la lógica del juego/frontend.
+function _espnToLegacyGame(espnMatch) {
+  if (!espnMatch) return null;
+  const status = espnMatch.status || {};
+  const isFinished = !!status.completed || status.state === 'post';
+  const isLive = status.state === 'in' || !!status.isLive;
+
+  let timeElapsed = '';
+  if (isLive) timeElapsed = status.detail || status.shortDetail || 'live';
+  else if (!isFinished) timeElapsed = 'notstarted';
+
+  let group = null, matchday = null;
+  if (espnMatch.round) {
+    const gm = String(espnMatch.round).match(/Group\s+([A-L])/i);
+    if (gm) group = gm[1].toUpperCase();
+    const mm = String(espnMatch.round).match(/Matchday\s+(\d+)/i);
+    if (mm) matchday = mm[1];
+  }
+
+  return {
+    id: espnMatch.id,
+    home_team_name_en: espnMatch.home?.name || '',
+    away_team_name_en: espnMatch.away?.name || '',
+    kickoff_utc: espnMatch.date,
+    finished: isFinished ? 'TRUE' : 'FALSE',
+    time_elapsed: timeElapsed,
+    home_score: espnMatch.home?.score,
+    away_score: espnMatch.away?.score,
+    group,
+    matchday,
+    stadium_name: espnMatch.venue || '',
+    city: '',
+  };
+}
+
 function _mapWC26Match(m) {
   
   
@@ -542,8 +586,28 @@ const API = {
 
   
   async _wc26(endpoint) {
-    if (USE_MOCK_ONLY) return null; 
-    return await this._fetch(`${WC26_BASE}${endpoint}`);
+    if (USE_MOCK_ONLY) return null;
+
+    // GET /get/games -> lista de partidos del Mundial (todas las ligas soportadas)
+    if (endpoint === '/get/games') {
+      const data = await this._fetch(`${WC26_BASE}/matches?league=${ESPN_WC_LEAGUE}`);
+      if (!data || !data.success) return null;
+      return (data.data || []).map(_espnToLegacyGame).filter(Boolean);
+    }
+
+    // GET /get/games/:id -> detalle de un partido específico
+    if (endpoint.startsWith('/get/games/')) {
+      const id = endpoint.split('/').pop();
+      const data = await this._fetch(`${WC26_BASE}/match/${id}`);
+      if (!data || !data.success || !data.data) return null;
+      return [_espnToLegacyGame(data.data)];
+    }
+
+    // GET /get/stadiums -> no soportado por la nueva API, se usa el fallback
+    // estático que ya existe más abajo (getStadiums) automáticamente.
+    if (endpoint === '/get/stadiums') return null;
+
+    return null;
   },
 
   
@@ -938,7 +1002,7 @@ const API = {
       API_STATUS.usingMock = !apiConnected;
       return {
         live, upcoming, standings, finished,
-        source: apiConnected ? 'worldcup26.ir' : 'mock'
+        source: apiConnected ? 'espn-api' : 'mock'
       };
     } catch(err) {
       API_STATUS.lastError = 'network';
