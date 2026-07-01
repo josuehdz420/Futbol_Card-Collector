@@ -18,6 +18,28 @@ const App = {
   async init() {
     const splash = document.getElementById('loading-splash');
 
+    // --- Pedir almacenamiento persistente ---
+    // En Android (Chrome/Samsung Internet), si el sitio tiene poco "site
+    // engagement" (poco visitado, no instalado), el navegador puede borrar
+    // IndexedDB/localStorage bajo presión de almacenamiento SIN avisar. Esto
+    // es lo que explica que en desktop la caché sobreviva entre recargas y
+    // en el celular no. persist() le pide al navegador que NO borre los
+    // datos de este origen bajo presión (no garantizado, pero ayuda mucho,
+    // y Chrome lo concede automáticamente si la app está instalada / en la
+    // pantalla de inicio). No bloquea el arranque.
+    try {
+      if (navigator.storage?.persist) {
+        navigator.storage.persist().then(granted => {
+          console.log(`[Storage] persist() -> ${granted ? 'concedido ✅' : 'denegado ⚠️'}`);
+        });
+      }
+      if (navigator.storage?.estimate) {
+        navigator.storage.estimate().then(({ usage, quota }) => {
+          console.log(`[Storage] uso: ${(usage/1024).toFixed(0)}KB / cuota: ${(quota/1024/1024).toFixed(1)}MB`);
+        });
+      }
+    } catch(_) {}
+
     try {
       const now = new Date();
       const todayLocal = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
@@ -29,16 +51,19 @@ const App = {
     } catch(_) {}
 
     try {
+      const _dbT0 = performance.now();
       await DB.open();
+      console.log(`[Perf] DB.open() -> ${(performance.now()-_dbT0).toFixed(0)}ms`);
     } catch(dbErr) {
       console.error('DB.open() falló:', dbErr);
-      try {
-        indexedDB.deleteDatabase('WCCollectorUES');
-        console.warn('BD eliminada, recargando...');
-      } catch(_) {}
-      if (splash) splash.innerHTML = '<p style="color:#f87171;text-align:center;padding:2rem">Error de base de datos.<br>Recargando…</p>';
-      setTimeout(() => window.location.reload(), 2000);
-      return;
+      // Antes: borraba una BD con nombre equivocado ('WCCollectorUES' en vez
+      // de 'WCCollectorUES_cache') y forzaba un reload cada 2s — si el fallo
+      // era persistente (p.ej. otra pestaña bloqueando en móvil, donde es
+      // común que queden pestañas "congeladas" en segundo plano), esto
+      // generaba un bucle de recargas que se sentía como "nunca carga".
+      // Ahora: se limpia la BD correcta una sola vez y se sigue SIN caché
+      // esta sesión, en vez de recargar en bucle.
+      try { await DB.resetDB(); } catch(_) {}
     }
 
     let user = null;
@@ -48,10 +73,14 @@ const App = {
       // para no sumar latencia. Preload() lee lo último guardado en
       // IndexedDB hacia memoria, así el primer Dashboard.render() ya
       // encuentra datos listos y no espera a la red.
+      const _cacheT0 = performance.now();
       const [recoveredUser] = await Promise.all([
         Auth.recoverSession(),
         (typeof Cache !== 'undefined'
-          ? Cache.preload(['live', 'upcoming', 'standings', 'finished'])
+          ? Cache.preload(['live', 'upcoming', 'standings', 'finished']).then(() => {
+              const hits = ['live', 'upcoming', 'standings', 'finished'].filter(k => Cache.get(k));
+              console.log(`[Perf] Cache.preload() -> ${(performance.now()-_cacheT0).toFixed(0)}ms · hits: [${hits.join(', ') || 'ninguno'}]`);
+            })
           : Promise.resolve())
       ]);
       user = recoveredUser;
