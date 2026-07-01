@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'wcc-ues-v18';
+const CACHE_VERSION = 'wcc-ues-v19';
 const BASE = '/Futbol_Card-Collector';
 
 const STATIC_ASSETS = [
@@ -11,6 +11,7 @@ const STATIC_ASSETS = [
   BASE + '/css/app.css',
   BASE + '/css/main.css',
   BASE + '/css/auth.css',
+  BASE + '/js/utils/firebase-config.js',
   BASE + '/js/utils/db.js',
   BASE + '/js/utils/auth.js',
   BASE + '/js/utils/toast.js',

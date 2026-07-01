@@ -254,6 +254,10 @@
   </div>
 
  
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js" is:inline></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js" is:inline></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js" is:inline></script>
+  <script src="/Futbol_Card-Collector/js/utils/firebase-config.js" is:inline></script>
   <script src="/Futbol_Card-Collector/js/utils/db.js" is:inline></script>
   <script src="/Futbol_Card-Collector/js/utils/auth.js" is:inline></script>
   <script src="/Futbol_Card-Collector/js/utils/toast.js" is:inline></script>
@@ -539,47 +543,48 @@
             'El archivo pertenece a ' + data.email + ', no a este correo'; return;
         }
 
-        const existing = await DB.getUser(email);
-        if (existing) {
-          const hash = await Auth.hashPassword(pass);
-          existing.passwordHash = hash;
-          existing.figuritas    = data.figuritas || existing.figuritas;
-          existing.tiradas      = typeof data.tiradas === 'number' ? data.tiradas : existing.tiradas;
-          existing.monedas      = typeof data.monedas === 'number' ? data.monedas : existing.monedas;
-          existing.aciertos     = Number(data.aciertos) || existing.aciertos;
-          existing.pityCount    = Number(data.pityCount) || 0;
-          existing.favoritos    = data.favoritos    || existing.favoritos;
-          existing.predicciones = data.predicciones || existing.predicciones;
-          existing.equipo_ideal = data.equipo_ideal || existing.equipo_ideal;
-          if (data.photoURL)      existing.photoURL     = data.photoURL;
-          if (data.lastDailyPull) existing.lastDailyPull = data.lastDailyPull;
-          if (data.lastDailySpin) existing.lastDailySpin = data.lastDailySpin;
-          existing.freeSpinsClaimed = true;
-          await DB.saveUser(existing);
-        } else {
-          const hash = await Auth.hashPassword(pass);
-          const user = {
-            email,
-            name:             data.usuario || email.split('@')[0],
-            passwordHash:     hash,
-            createdAt:        new Date().toISOString(),
-            tiradas:          typeof data.tiradas === 'number' ? data.tiradas : 0,
-            freeSpinsClaimed: true,
-            monedas:          typeof data.monedas === 'number' ? data.monedas : 0,
-            aciertos:         Number(data.aciertos) || 0,
-            pityCount:        Number(data.pityCount) || 0,
-            figuritas:        data.figuritas || [],
-            favoritos:        data.favoritos || [],
-            predicciones:     data.predicciones || [],
-            equipo_ideal:     data.equipo_ideal || {},
-            photoURL:         data.photoURL || null,
-            lastDailyPull:    data.lastDailyPull || null,
-            lastDailySpin:    data.lastDailySpin || null,
-          };
-          await DB.saveUser(user);
+        // Con Firebase Auth ya no manejamos hashes a mano: intentamos
+        // iniciar sesión con ese correo/contraseña y, si la cuenta no
+        // existe todavía en Firebase Auth, la creamos.
+        let cred;
+        try {
+          cred = await fbAuth.signInWithEmailAndPassword(email, pass);
+        } catch (signInErr) {
+          if (signInErr.code === 'auth/user-not-found') {
+            cred = await fbAuth.createUserWithEmailAndPassword(email, pass);
+          } else if (signInErr.code === 'auth/wrong-password' || signInErr.code === 'auth/invalid-credential') {
+            document.getElementById('transfer-pass-err').textContent = 'Contraseña incorrecta para esta cuenta';
+            return;
+          } else {
+            throw signInErr;
+          }
         }
 
-        await DB.setSession(email);
+        const ref  = fbDB.collection('users').doc(cred.user.uid);
+        const snap = await ref.get();
+        const existing = snap.exists ? snap.data() : null;
+
+        const merged = {
+          email,
+          name:             (existing && existing.name) || data.usuario || email.split('@')[0],
+          createdAt:        (existing && existing.createdAt) || new Date().toISOString(),
+          figuritas:        data.figuritas || (existing && existing.figuritas) || [],
+          tiradas:          typeof data.tiradas === 'number' ? data.tiradas : (existing && existing.tiradas) || 0,
+          monedas:          typeof data.monedas === 'number' ? data.monedas : (existing && existing.monedas) || 0,
+          aciertos:         Number(data.aciertos) || (existing && existing.aciertos) || 0,
+          pityCount:        Number(data.pityCount) || 0,
+          favoritos:        data.favoritos    || (existing && existing.favoritos) || [],
+          predicciones:     data.predicciones || (existing && existing.predicciones) || [],
+          equipo_ideal:     data.equipo_ideal || (existing && existing.equipo_ideal) || {},
+          photoURL:         data.photoURL      || (existing && existing.photoURL)      || null,
+          lastDailyPull:    data.lastDailyPull || (existing && existing.lastDailyPull) || null,
+          lastDailySpin:    data.lastDailySpin || (existing && existing.lastDailySpin) || null,
+          freeSpinsClaimed: true,
+          activity_log:     (existing && existing.activity_log) || []
+        };
+
+        await ref.set(merged, { merge: true });
+
         Toast.success('✅ Cuenta restaurada — ¡Bienvenido de vuelta, ' + data.usuario.split(' ')[0] + '!');
         setTimeout(() => window.location.replace('/Futbol_Card-Collector/app'), 800);
       } catch(err) {

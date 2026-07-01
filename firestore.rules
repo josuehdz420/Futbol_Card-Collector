@@ -1,0 +1,22 @@
+rules_version = '2';
+
+// Reglas de seguridad de Firestore para World Cup Collector UES.
+// Pega esto en: Firebase Console → Firestore Database → Reglas.
+//
+// Idea: cada usuario solo puede leer/escribir SU PROPIO documento
+// (users/{uid}), identificado por su uid de Firebase Auth. Nadie puede
+// leer ni modificar los datos de otro usuario.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Bloquea todo lo demás por defecto.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

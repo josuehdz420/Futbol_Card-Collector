@@ -1,8 +1,22 @@
-const DB_NAME    = 'WCCollectorUES';
-const DB_VERSION = 3;
+// db.js
+// --------------------------------------------------
+// Desde la migración a Firebase, esta capa cumple DOS roles:
+//
+// 1) Caché local pura (stats_cache, photo_cache) — sigue en IndexedDB,
+//    porque es solo optimización de rendimiento, no datos de cuenta.
+//
+// 2) Funciones de compatibilidad hacia Firestore (getUser, saveUser,
+//    logActivity) para el flujo de "transferir cuenta por JSON" en
+//    login.astro y para los módulos que ya llamaban DB.logActivity(...).
+//
+// Los datos de cuenta (figuritas, monedas, predicciones, etc.) YA NO
+// viven aquí — viven en Firestore, gestionados desde auth.js.
+
+const DB_NAME    = 'WCCollectorUES_cache';
+const DB_VERSION = 1;
 
 let _db     = null;
-let _dbProm = null; 
+let _dbProm = null;
 
 const DB = {
   open() {
@@ -13,61 +27,31 @@ const DB = {
       let req;
       try {
         req = indexedDB.open(DB_NAME, DB_VERSION);
-      } catch(e) {
+      } catch (e) {
         _dbProm = null;
         reject(e);
         return;
       }
 
-      
       const timeout = setTimeout(() => {
         _dbProm = null;
         reject(new Error('IndexedDB timeout — puede haber otra pestaña bloqueando'));
       }, 8000);
 
-      req.onblocked = () => {
-        
-        
-        console.warn('DB bloqueada por otra pestaña — esperando...');
-      };
+      req.onblocked = () => console.warn('DB bloqueada por otra pestaña — esperando...');
 
       req.onupgradeneeded = (e) => {
-        const db  = e.target.result;
-        const old = e.oldVersion;
-
-        
-        db.onerror = (ev) => console.error('DB upgrade error:', ev);
-
-        const ensure = (name, opts, indexFn) => {
-          if (!db.objectStoreNames.contains(name)) {
-            const store = db.createObjectStore(name, opts);
-            if (indexFn) indexFn(store);
-          }
+        const db = e.target.result;
+        const ensure = (name, opts) => {
+          if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, opts);
         };
-
-        
-        ensure('users',       { keyPath: 'email' }, s => s.createIndex('email','email',{unique:true}));
-        ensure('session',     { keyPath: 'key' });
-        ensure('figuritas',   { keyPath: 'id'  },   s => s.createIndex('rareza','rareza',{unique:false}));
-        ensure('predicciones',{ keyPath: 'matchId' });
-        ensure('favoritos',   { keyPath: 'id'  },   s => s.createIndex('tipo','tipo',{unique:false}));
         ensure('stats_cache', { keyPath: 'key' });
-
-        
-        ensure('equipo_ideal', { keyPath: 'email' });
-        ensure('activity_log', { keyPath: 'id', autoIncrement: true }, s => {
-          s.createIndex('email',     'email',     { unique: false });
-          s.createIndex('timestamp', 'timestamp', { unique: false });
-        });
-
-        
         ensure('photo_cache', { keyPath: 'id' });
       };
 
       req.onsuccess = (e) => {
         clearTimeout(timeout);
         _db = e.target.result;
-        
         _db.onclose        = () => { _db = null; _dbProm = null; };
         _db.onversionchange = () => { _db.close(); _db = null; _dbProm = null; };
         resolve(_db);
@@ -84,19 +68,16 @@ const DB = {
     return _dbProm;
   },
 
-  
   async resetDB() {
-    _db     = null;
-    _dbProm = null;
+    _db = null; _dbProm = null;
     return new Promise((res, rej) => {
       const req = indexedDB.deleteDatabase(DB_NAME);
       req.onsuccess = () => res();
       req.onerror   = () => rej(req.error);
-      req.onblocked = () => { res(); }; 
+      req.onblocked = () => res();
     });
   },
 
-  
   async put(store, value) {
     const db = await this.open();
     return new Promise((res, rej) => {
@@ -112,27 +93,6 @@ const DB = {
     return new Promise((res, rej) => {
       const tx  = db.transaction(store, 'readonly');
       const req = tx.objectStore(store).get(key);
-      req.onsuccess = () => res(req.result);
-      req.onerror   = () => rej(req.error);
-    });
-  },
-
-  async getAll(store) {
-    const db = await this.open();
-    return new Promise((res, rej) => {
-      const tx  = db.transaction(store, 'readonly');
-      const req = tx.objectStore(store).getAll();
-      req.onsuccess = () => res(req.result);
-      req.onerror   = () => rej(req.error);
-    });
-  },
-
-  async getAllByIndex(store, indexName, value) {
-    const db = await this.open();
-    return new Promise((res, rej) => {
-      const tx  = db.transaction(store, 'readonly');
-      const idx = tx.objectStore(store).index(indexName);
-      const req = idx.getAll(value);
       req.onsuccess = () => res(req.result);
       req.onerror   = () => rej(req.error);
     });
@@ -158,53 +118,65 @@ const DB = {
     });
   },
 
-  
-  async getSession()      { const r = await this.get('session','current'); return r?.email || null; },
-  async setSession(email) { await this.put('session', { key:'current', email }); },
-  async clearSession()    { await this.delete('session','current'); },
-
-  
-  async getUser(email)  { return await this.get('users', email); },
-  async saveUser(user)  { return await this.put('users', user); },
-
-  
   async getCacheStats(key) {
     const row = await this.get('stats_cache', key);
     if (!row) return null;
-    if (Date.now() - row.timestamp > 30 * 60 * 1000) return null; 
+    if (Date.now() - row.timestamp > 30 * 60 * 1000) return null;
     return row.data;
   },
   async setCacheStats(key, data) {
     await this.put('stats_cache', { key, data, timestamp: Date.now() });
   },
 
-  
-  async getEquipoIdeal(email) {
-    const row = await this.get('equipo_ideal', email);
-    return row?.slots || {};
-  },
-  async saveEquipoIdeal(email, slots) {
-    await this.put('equipo_ideal', { email, slots });
+  // ---- Compatibilidad Firestore (cuentas) ----
+
+  // NOTA: ya no se usa en el flujo actual (login.astro ahora resuelve
+  // el usuario por uid tras signIn/createUser). Se deja de referencia,
+  // pero con las reglas de seguridad de firestore.rules esta consulta
+  // por email fallará para cualquiera excepto el propio usuario, porque
+  // Firestore exige que las reglas puedan validarse por documento.
+  async getUser(email) {
+    const norm = email.toLowerCase().trim();
+    const snap = await fbDB.collection('users').where('email', '==', norm).limit(1).get();
+    if (snap.empty) return null;
+    const doc = snap.docs[0];
+    return { uid: doc.id, ...doc.data() };
   },
 
-  
+  // Guarda/actualiza el documento de usuario en Firestore. Requiere que
+  // el usuario ya esté autenticado con Firebase Auth (uid presente).
+  async saveUser(user) {
+    const fbUser = fbAuth.currentUser;
+    const uid = user.uid || (fbUser && fbUser.uid);
+    if (!uid) throw new Error('No hay sesión activa de Firebase para guardar el usuario');
+    const { uid: _drop, ...data } = user;
+    await fbDB.collection('users').doc(uid).set(data, { merge: true });
+  },
+
   async logActivity(email, type, detail = '') {
     try {
-      await this.put('activity_log', {
-        email, type, detail,
-        timestamp: Date.now()
+      const fbUser = fbAuth.currentUser;
+      if (!fbUser) return;
+      const ref = fbDB.collection('users').doc(fbUser.uid);
+      await ref.update({
+        activity_log: firebase.firestore.FieldValue.arrayUnion({
+          type, detail, timestamp: Date.now()
+        })
       });
-    } catch(_) {  }
+    } catch (_) { /* no crítico */ }
   },
 
-  async getRecentActivity(email, limit = 10) {
-    const all = await this.getAllByIndex('activity_log', 'email', email);
-    return all.sort((a,b) => b.timestamp - a.timestamp).slice(0, limit);
+  async getRecentActivity(limit = 10) {
+    const fbUser = fbAuth.currentUser;
+    if (!fbUser) return [];
+    const snap = await fbDB.collection('users').doc(fbUser.uid).get();
+    const log = (snap.data() || {}).activity_log || [];
+    return log.sort((a, b) => b.timestamp - a.timestamp).slice(0, limit);
   },
 
-  
-  async countOwnedFiguritas(email) {
-    const user = await this.getUser(email);
-    return (user?.figuritas || []).length;
-  }
+  // La sesión ahora la maneja Firebase Auth solo (persistencia LOCAL).
+  // Se dejan como no-ops para no romper llamadas existentes.
+  async getSession()      { return null; },
+  async setSession(_email) {},
+  async clearSession()    {}
 };
