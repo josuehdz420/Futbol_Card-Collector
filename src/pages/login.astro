@@ -6,16 +6,16 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <link rel="manifest" href="/worldcup-v15b-loading-fixed/manifest.json"/>
-  <link rel="icon" type="image/png" sizes="192x192" href="/worldcup-v15b-loading-fixed/icons/icon-192.png"/>
-  <link rel="apple-touch-icon" href="/worldcup-v15b-loading-fixed/icons/icon-192.png"/>
+  <link rel="manifest" href="/Futbol_Card-Collector/manifest.json"/>
+  <link rel="icon" type="image/png" sizes="192x192" href="/Futbol_Card-Collector/icons/icon-192.png"/>
+  <link rel="apple-touch-icon" href="/Futbol_Card-Collector/icons/icon-192.png"/>
   <meta name="theme-color" content="#080c14"/>
   <meta name="apple-mobile-web-app-capable" content="yes"/>
   <title>Fifa World Cup Coleccion — UES · Login</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow:wght@300;400;600;700&family=Barlow+Condensed:wght@400;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/worldcup-v15b-loading-fixed/css/worldcup2026-theme.css"/>
-  <link rel="stylesheet" href="/worldcup-v15b-loading-fixed/css/auth.css"/>
+  <link rel="stylesheet" href="/Futbol_Card-Collector/css/worldcup2026-theme.css"/>
+  <link rel="stylesheet" href="/Futbol_Card-Collector/css/auth.css"/>
   <style>
     .file-drop {
       display:block;cursor:pointer;border:1.5px dashed rgba(0,212,255,0.3);
@@ -134,11 +134,11 @@
 <body>
 
   <div id="welcome-anim">
-    <video id="welcome-video" src="/worldcup-v15b-loading-fixed/videos/login-welcome.mp4" playsinline muted></video>
+    <video id="welcome-video" src="/Futbol_Card-Collector/videos/login-welcome.mp4" playsinline muted></video>
   </div>
 
   <div class="splash-loader" id="splash">
-    <img src="/worldcup-v15b-loading-fixed/icons/icon-192.png" class="splash-ball" style="width:80px;height:80px;border-radius:50%;object-fit:cover;" alt="WCC Logo"/>
+    <img src="/Futbol_Card-Collector/icons/icon-192.png" class="splash-ball" style="width:80px;height:80px;border-radius:50%;object-fit:cover;" alt="WCC Logo"/>
     <p class="splash-text">Verificando sesión…</p>
   </div>
 
@@ -150,7 +150,7 @@
 
   <div class="auth-container">
     <div class="auth-logo">
-      <img src="/worldcup-v15b-loading-fixed/icons/icon-192.png" class="logo-icon" style="width:72px;height:72px;border-radius:50%;object-fit:cover;" alt="WCC Logo"/>
+      <img src="/Futbol_Card-Collector/icons/icon-192.png" class="logo-icon" style="width:72px;height:72px;border-radius:50%;object-fit:cover;" alt="WCC Logo"/>
       <h1 class="logo-title">FIFA WORLD CUP<br><span>COLECCION</span></h1>
       <p class="logo-sub">Universidad de El Salvador</p>
     </div>
@@ -254,9 +254,9 @@
   </div>
 
  
-  <script src="/worldcup-v15b-loading-fixed/js/utils/db.js" is:inline></script>
-  <script src="/worldcup-v15b-loading-fixed/js/utils/auth.js" is:inline></script>
-  <script src="/worldcup-v15b-loading-fixed/js/utils/toast.js" is:inline></script>
+  <script src="/Futbol_Card-Collector/js/utils/db.js" is:inline></script>
+  <script src="/Futbol_Card-Collector/js/utils/auth.js" is:inline></script>
+  <script src="/Futbol_Card-Collector/js/utils/toast.js" is:inline></script>
 
   <script is:inline>
     const splash = document.getElementById('splash');
@@ -273,7 +273,7 @@
         const user = await Auth.recoverSession();
         clearTimeout(safetyTimer);
         if (user) {
-          window.location.replace('/worldcup-v15b-loading-fixed/app');
+          window.location.replace('/Futbol_Card-Collector/app');
           return;
         }
       } catch(err) {
@@ -368,9 +368,9 @@
           welcomeVideo.muted = true;
           welcomeVideo.play().catch(() => {});
         });
-        setTimeout(() => window.location.replace('/worldcup-v15b-loading-fixed/app'), 3200);
+        setTimeout(() => window.location.replace('/Futbol_Card-Collector/app'), 3200);
       } else {
-        setTimeout(() => window.location.replace('/worldcup-v15b-loading-fixed/app'), 600);
+        setTimeout(() => window.location.replace('/Futbol_Card-Collector/app'), 600);
       }
     }
 
@@ -460,7 +460,7 @@
 
     function closeTutorialAndEnter() {
       document.getElementById('tutorial-overlay').classList.remove('show');
-      window.location.replace('/worldcup-v15b-loading-fixed/app');
+      window.location.replace('/Futbol_Card-Collector/app');
     }
 
     document.getElementById('tutorial-next').addEventListener('click', () => {
@@ -581,7 +581,7 @@
 
         await DB.setSession(email);
         Toast.success('✅ Cuenta restaurada — ¡Bienvenido de vuelta, ' + data.usuario.split(' ')[0] + '!');
-        setTimeout(() => window.location.replace('/worldcup-v15b-loading-fixed/app'), 800);
+        setTimeout(() => window.location.replace('/Futbol_Card-Collector/app'), 800);
       } catch(err) {
         document.getElementById('transfer-file-err').textContent = 'Error al leer el archivo: ' + err.message;
       } finally {
@@ -597,7 +597,7 @@
   <script is:inline>
     if ('serviceWorker' in navigator && location.protocol !== 'file:') {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/worldcup-v15b-loading-fixed/sw.js').catch(err => {
+        navigator.serviceWorker.register('/Futbol_Card-Collector/sw.js').catch(err => {
           console.error('[PWA] Error registrando SW:', err);
         });
       });

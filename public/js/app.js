@@ -55,7 +55,7 @@ const App = {
     }
 
     if (!user) {
-      window.location.replace('/worldcup-v15b-loading-fixed/login');
+      window.location.replace('/Futbol_Card-Collector/login');
       return;
     }
 
@@ -232,7 +232,7 @@ const App = {
       await Auth.logout();
       API.clearPhotoCache();            
       await DB.clear('stats_cache');   
-      window.location.replace('/worldcup-v15b-loading-fixed/login');
+      window.location.replace('/Futbol_Card-Collector/login');
     });
 
     document.getElementById('btn-gacha-1')?.addEventListener('click',  () => this.doPull(1));

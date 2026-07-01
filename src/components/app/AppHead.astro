@@ -1,3 +1,10 @@
+<script is:inline>
+  // Define aquí la URL pública de tu API (Render, Railway, Fly.io, etc.)
+  // antes de desplegar. En localhost se usa automáticamente localhost:3001.
+  window.__API_BASE__ = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+    ? 'http://localhost:3001'
+    : 'https://TU-BACKEND-DESPLEGADO.example.com';
+</script>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
 <meta name="color-scheme" content="dark"/>
@@ -9,14 +16,14 @@
 <meta name="description" content="Colecciona figuritas del Mundial 2026, predice partidos y gana recompensas"/>
 <title>Fifa World Cup Coleccion — UES</title>
 
-<link rel="manifest" href="/worldcup-v15b-loading-fixed/manifest.json"/>
-<link rel="icon" type="image/png" sizes="192x192" href="/worldcup-v15b-loading-fixed/icons/icon-192.png"/>
-<link rel="apple-touch-icon" href="/worldcup-v15b-loading-fixed/icons/icon-192.png"/>
+<link rel="manifest" href="/Futbol_Card-Collector/manifest.json"/>
+<link rel="icon" type="image/png" sizes="192x192" href="/Futbol_Card-Collector/icons/icon-192.png"/>
+<link rel="apple-touch-icon" href="/Futbol_Card-Collector/icons/icon-192.png"/>
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow:wght@300;400;600;700&family=Barlow+Condensed:wght@400;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/worldcup-v15b-loading-fixed/css/worldcup2026-theme.css"/>
-<link rel="stylesheet" href="/worldcup-v15b-loading-fixed/css/app.css"/>
+<link rel="stylesheet" href="/Futbol_Card-Collector/css/worldcup2026-theme.css"/>
+<link rel="stylesheet" href="/Futbol_Card-Collector/css/app.css"/>
 
 <script src="https://cdn.jsdelivr.net/npm/@twemoji/api@latest/dist/twemoji.min.js" crossorigin="anonymous" is:inline></script>
 

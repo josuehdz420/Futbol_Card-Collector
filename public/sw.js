@@ -1,5 +1,5 @@
 const CACHE_VERSION = 'wcc-ues-v18';
-const BASE = '/worldcup-v15b-loading-fixed';
+const BASE = '/Futbol_Card-Collector';
 
 const STATIC_ASSETS = [
   BASE + '/',
@@ -112,8 +112,8 @@ self.addEventListener('push', e => {
   e.waitUntil(
     self.registration.showNotification(data.title, {
       body:     data.body,
-      icon: '/worldcup-v15b-loading-fixed/icons/icon-192.png',
-      badge: '/worldcup-v15b-loading-fixed/icons/icon-192.png',
+      icon: '/Futbol_Card-Collector/icons/icon-192.png',
+      badge: '/Futbol_Card-Collector/icons/icon-192.png',
       vibrate:  [100, 50, 100]
     })
   );
