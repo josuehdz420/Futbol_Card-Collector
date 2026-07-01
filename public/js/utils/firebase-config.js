@@ -7,12 +7,12 @@
 // Este archivo debe cargarse ANTES que db.js y auth.js.
 
 const firebaseConfig = {
-  apiKey:            "TU_API_KEY",
-  authDomain:         "TU_PROYECTO.firebaseapp.com",
-  projectId:          "TU_PROYECTO",
-  storageBucket:      "TU_PROYECTO.appspot.com",
-  messagingSenderId:  "TU_SENDER_ID",
-  appId:              "TU_APP_ID"
+  apiKey:            "AIzaSyBvKoLMEQ1tTZkQFQ405GZXSFtYiXSXtLA",
+  authDomain:         "futbol-card-collector.firebaseapp.com",
+  projectId:          "futbol-card-collector",
+  storageBucket:      "futbol-card-collector.firebasestorage.app",
+  messagingSenderId:  "414817311725",
+  appId:              "1:414817311725:web:d6f29ac0fd912a455125e4"
 };
 
 firebase.initializeApp(firebaseConfig);
