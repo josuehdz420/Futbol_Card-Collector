@@ -69,6 +69,7 @@ function normalizeEvent(event, leagueId) {
     round: note,
     status: {
       state: status.state, // "pre" | "in" | "post"
+      description: status.description || null, // ej. "Halftime", "Extra Time", "Penalty Shoot-out"
       detail: status.detail, // ej. "FT", "Live - 65'"
       shortDetail: status.shortDetail,
       isLive: status.state === "in",
@@ -286,14 +287,22 @@ async function getMatchById(matchId) {
       const home = competition?.competitors?.find((c) => c.homeAway === "home");
       const away = competition?.competitors?.find((c) => c.homeAway === "away");
 
+      const statusType = header?.competitions?.[0]?.status?.type || {};
       const detail = {
         id: matchId,
         league: leagueId,
         date: header?.competitions?.[0]?.date || null,
         status: {
-          state: header?.competitions?.[0]?.status?.type?.state,
-          detail: header?.competitions?.[0]?.status?.type?.detail,
-          isLive: header?.competitions?.[0]?.status?.type?.state === "in"
+          state: statusType.state,          // "pre" | "in" | "post"
+          completed: !!statusType.completed, // true incluso tras prórroga/penales
+          // "description"/"detail" ya vienen bien redactados por ESPN para
+          // entretiempo, prórroga y penales (ej. "Halftime", "Extra Time",
+          // "Penalty Shoot-out", "Full Time"): no los reconstruimos a mano,
+          // así evitamos el bug de mostrar mal esos estados.
+          description: statusType.description || null,
+          detail: statusType.detail || null,
+          shortDetail: statusType.shortDetail || null,
+          isLive: statusType.state === "in"
         },
         venue: data.gameInfo?.venue?.fullName || null,
         home: home
@@ -301,7 +310,8 @@ async function getMatchById(matchId) {
               id: home.team?.id,
               name: home.team?.displayName,
               logo: home.team?.logos?.[0]?.href,
-              score: home.score ?? null
+              score: home.score ?? null,
+              winner: !!home.winner
             }
           : null,
         away: away
@@ -309,26 +319,70 @@ async function getMatchById(matchId) {
               id: away.team?.id,
               name: away.team?.displayName,
               logo: away.team?.logos?.[0]?.href,
-              score: away.score ?? null
+              score: away.score ?? null,
+              winner: !!away.winner
             }
           : null,
-        // Eventos clave: goles, tarjetas, etc. (si ESPN los provee)
+        // Eventos clave: goles, tarjetas, cambios, etc. (feed crudo, si ESPN los provee)
         keyEvents: (data.keyEvents || []).map((ev) => ({
           type: ev.type?.text,
           clock: ev.clock?.displayValue,
           text: ev.text,
           team: ev.team?.displayName || null
         })),
+        // Goleadores (subconjunto de keyEvents, ya filtrado, para pintar
+        // directo en el marcador sin que el frontend tenga que adivinar
+        // qué texto es un gol).
+        scorers: (data.keyEvents || [])
+          .filter((ev) => /goal/i.test(ev.type?.text || ""))
+          .map((ev) => ({
+            player: ev.athletesInvolved?.[0]?.displayName || ev.text?.split(" - ")?.[0] || null,
+            clock: ev.clock?.displayValue || null,
+            team: ev.team?.displayName || null,
+            ownGoal: /own goal/i.test(ev.type?.text || ""),
+            penalty: /penalty/i.test(ev.type?.text || "")
+          })),
+        // Cambios (si ESPN los reporta como keyEvent de sustitución)
+        substitutions: (data.keyEvents || [])
+          .filter((ev) => /subst/i.test(ev.type?.text || ""))
+          .map((ev) => ({
+            clock: ev.clock?.displayValue || null,
+            team: ev.team?.displayName || null,
+            playerIn: ev.athletesInvolved?.[0]?.displayName || null,
+            playerOut: ev.athletesInvolved?.[1]?.displayName || null,
+            text: ev.text || null
+          })),
+        // Estadísticas rápidas por equipo (posesión, tiros, duelos, etc.)
+        // — el nombre exacto de cada stat lo pone ESPN (`name`/`label`); se
+        // deja tal cual para no perder cobertura si varía entre partidos.
+        statistics: (data.boxscore?.teams || []).map((t) => ({
+          team: t.team?.displayName,
+          stats: (t.statistics || []).map((s) => ({
+            name: s.name || s.label || null,
+            displayName: s.displayName || s.label || s.name || null,
+            value: s.displayValue ?? s.value ?? null
+          }))
+        })),
         // Formaciones / alineaciones si están disponibles
         lineups: data.rosters
           ? data.rosters.map((r) => ({
               team: r.team?.displayName,
               formation: r.formation || null,
-              players: (r.roster || []).map((p) => ({
-                name: p.athlete?.displayName,
-                position: p.position?.abbreviation,
-                starter: !!p.starter
-              }))
+              starters: (r.roster || [])
+                .filter((p) => !!p.starter)
+                .map((p) => ({
+                  name: p.athlete?.displayName,
+                  position: p.position?.abbreviation || null,
+                  jersey: p.jersey || null
+                })),
+              bench: (r.roster || [])
+                .filter((p) => !p.starter)
+                .map((p) => ({
+                  name: p.athlete?.displayName,
+                  position: p.position?.abbreviation || null,
+                  jersey: p.jersey || null,
+                  subbedIn: (p.subbedIn ?? p.plays?.some?.((pl) => /subst/i.test(pl.type?.text || ""))) || false
+                }))
             }))
           : []
       };

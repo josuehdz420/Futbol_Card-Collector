@@ -1776,3 +1776,22 @@ input, button { font-family: inherit; }
       0 0 80px rgba(0, 229, 160, 0.15);
   }
 }
+
+/* --- Ficha de partido (MatchDetail) y tarjetas de partido clicleables --- */
+.match-item-clickable {
+  transition: background 0.15s, transform 0.1s;
+}
+.match-item-clickable:active {
+  background: rgba(255,255,255,0.04);
+  transform: scale(0.99);
+}
+.md-tab-btn {
+  background: transparent;
+  border: 1px solid var(--border-bright);
+  color: var(--text-secondary);
+}
+.md-tab-btn.active {
+  background: var(--accent-glow);
+  border-color: var(--accent);
+  color: var(--accent);
+}

@@ -391,6 +391,53 @@ function _utcToSV(utcStr) {
 // (server/src/services/espnService.js) al formato "legacy" que ya entiende
 // _mapWC26Match más abajo (mismo formato que usaba la API vieja). Así no
 // hay que tocar el resto de la lógica del juego/frontend.
+// --- Formatea el estado/minuto de un partido en vivo de forma correcta ---
+// Antes: se tomaba status.detail/shortDetail de ESPN y en la UI se le
+// pegaba una comilla a ciegas (ej. "Halftime" -> "Halftime'"), y aparte
+// había un límite de reloj de pared (115 min) que marcaba el partido como
+// "finalizado" justo antes de que pudiera empezar la prórroga. Con esto:
+//   - Si ESPN ya manda un texto reconocible (entretiempo, prórroga,
+//     penales, etc.) lo traducimos a español, SIN inventar minutos.
+//   - Si es un minuto puro tipo "45'" o "90+2'" se deja tal cual (ya trae
+//     su comilla, no hay que agregar otra).
+//   - Cualquier otro texto de ESPN que no reconozcamos se muestra literal
+//     en vez de forzarlo a un formato de minuto que no le corresponde.
+const _PHASE_LABELS = [
+  [/^1st half$/i,                 null],            // deja pasar el minuto normal
+  [/^2nd half$/i,                 null],
+  [/^halftime$/i,                 'Descanso'],
+  [/^half$/i,                     'Descanso'],
+  [/^full ?time$/i,               'Final'],
+  [/end of extra time/i,          'Fin prórroga'],
+  [/extra time.*1st half|extra time.*first half/i, 'Prórroga 1T'],
+  [/extra time.*2nd half|extra time.*second half/i, 'Prórroga 2T'],
+  [/^extra time$/i,               'Prórroga'],
+  [/penalty shoot-?out|^pens?o?$|shootout/i, 'Penales'],
+  [/after penalties/i,            'Final (penales)'],
+  [/after extra time|^aet$/i,     'Final (prórroga)'],
+  [/postponed/i,                  'Aplazado'],
+  [/suspended/i,                  'Suspendido'],
+  [/cancell?ed/i,                 'Cancelado'],
+  [/^ft$/i,                       'Final'],
+  [/^ht$/i,                       'Descanso'],
+];
+
+function _formatMatchPhase(rawDetail) {
+  const desc = String(rawDetail || '').trim();
+  if (!desc) return '';
+
+  for (const [re, label] of _PHASE_LABELS) {
+    if (re.test(desc)) return label != null ? label : desc; // null = dejar el minuto tal cual
+  }
+
+  // Minuto puro (ej. "45'", "90+3'", "12'"): se deja como viene, ya trae comilla.
+  if (/^\d+(\+\d+)?'?$/.test(desc)) return desc.endsWith("'") ? desc : `${desc}'`;
+
+  // Cualquier otro texto de ESPN no reconocido: mostrarlo literal en vez
+  // de forzar un formato de minuto incorrecto.
+  return desc;
+}
+
 function _espnToLegacyGame(espnMatch) {
   if (!espnMatch) return null;
   const status = espnMatch.status || {};
@@ -398,7 +445,7 @@ function _espnToLegacyGame(espnMatch) {
   const isLive = status.state === 'in' || !!status.isLive;
 
   let timeElapsed = '';
-  if (isLive) timeElapsed = status.detail || status.shortDetail || 'live';
+  if (isLive) timeElapsed = _formatMatchPhase(status.description || status.detail || status.shortDetail) || 'live';
   else if (!isFinished) timeElapsed = 'notstarted';
 
   let group = null, matchday = null;
@@ -463,6 +510,7 @@ function _normalizeEspnEventDirect(event, leagueId) {
     round: note,
     status: {
       state: status.state,
+      description: status.description || null,
       detail: status.detail,
       shortDetail: status.shortDetail,
       isLive: status.state === 'in',
@@ -521,6 +569,84 @@ async function _fetchEspnMatchDirect(matchId) {
       id: away.team?.id, name: away.team?.displayName,
       logo: away.team?.logos?.[0]?.href, score: away.score ?? null,
     } : null,
+  };
+}
+
+// Igual que getMatchById en espnService.js pero llamado directo desde el
+// navegador (último recurso si nuestro backend propio no responde). Trae
+// el detalle "enriquecido" completo: goleadores, cambios, estadísticas y
+// alineaciones — no solo el marcador básico como _fetchEspnMatchDirect.
+async function _fetchEspnMatchDetailDirect(matchId) {
+  const url  = `${ESPN_DIRECT_BASE}/${ESPN_WC_LEAGUE}/summary?event=${matchId}`;
+  const data = await _fetchEspnDirect(url);
+  if (!data || (!data.header && !data.boxscore)) return null;
+
+  const header      = data.header;
+  const competition = header?.competitions?.[0];
+  const home = competition?.competitors?.find(c => c.homeAway === 'home');
+  const away = competition?.competitors?.find(c => c.homeAway === 'away');
+  const statusType = competition?.status?.type || {};
+
+  return {
+    id: matchId,
+    league: ESPN_WC_LEAGUE,
+    date: competition?.date || null,
+    status: {
+      state: statusType.state,
+      completed: !!statusType.completed,
+      description: statusType.description || null,
+      detail: statusType.detail || null,
+      shortDetail: statusType.shortDetail || null,
+      isLive: statusType.state === 'in',
+    },
+    venue: data.gameInfo?.venue?.fullName || null,
+    home: home ? {
+      id: home.team?.id, name: home.team?.displayName,
+      logo: home.team?.logos?.[0]?.href, score: home.score ?? null, winner: !!home.winner,
+    } : null,
+    away: away ? {
+      id: away.team?.id, name: away.team?.displayName,
+      logo: away.team?.logos?.[0]?.href, score: away.score ?? null, winner: !!away.winner,
+    } : null,
+    keyEvents: (data.keyEvents || []).map(ev => ({
+      type: ev.type?.text, clock: ev.clock?.displayValue, text: ev.text,
+      team: ev.team?.displayName || null,
+    })),
+    scorers: (data.keyEvents || [])
+      .filter(ev => /goal/i.test(ev.type?.text || ''))
+      .map(ev => ({
+        player: ev.athletesInvolved?.[0]?.displayName || ev.text?.split(' - ')?.[0] || null,
+        clock: ev.clock?.displayValue || null,
+        team: ev.team?.displayName || null,
+        ownGoal: /own goal/i.test(ev.type?.text || ''),
+        penalty: /penalty/i.test(ev.type?.text || ''),
+      })),
+    substitutions: (data.keyEvents || [])
+      .filter(ev => /subst/i.test(ev.type?.text || ''))
+      .map(ev => ({
+        clock: ev.clock?.displayValue || null, team: ev.team?.displayName || null,
+        playerIn: ev.athletesInvolved?.[0]?.displayName || null,
+        playerOut: ev.athletesInvolved?.[1]?.displayName || null,
+        text: ev.text || null,
+      })),
+    statistics: (data.boxscore?.teams || []).map(t => ({
+      team: t.team?.displayName,
+      stats: (t.statistics || []).map(s => ({
+        name: s.name || s.label || null,
+        displayName: s.displayName || s.label || s.name || null,
+        value: s.displayValue ?? s.value ?? null,
+      })),
+    })),
+    lineups: data.rosters ? data.rosters.map(r => ({
+      team: r.team?.displayName,
+      formation: r.formation || null,
+      starters: (r.roster || []).filter(p => !!p.starter).map(p => ({
+        name: p.athlete?.displayName, position: p.position?.abbreviation || null, jersey: p.jersey || null,
+      })),
+      bench: (r.roster || []).filter(p => !p.starter).map(p => ({
+        name: p.athlete?.displayName, position: p.position?.abbreviation || null, jersey: p.jersey || null,
+      })),
+    })) : [],
   };
 }
 
@@ -1018,6 +1144,16 @@ const API = {
     return '-06:00';
   },
 
+  // Ventana máxima (minutos de reloj de pared desde el kickoff) durante la
+  // que seguimos asumiendo "puede seguir en vivo" cuando no tenemos
+  // confirmación real de la API. 90 (tiempo regular) + ~15 (descanso) + 30
+  // (prórroga) + ~15 (descanso de prórroga) + penales + margen de atraso de
+  // transmisión. Antes eran 115 min, que cortaba el partido justo antes de
+  // que pudiera empezar la prórroga — de ahí el bug de "solo muestra hasta
+  // cierto minuto". Esto es solo una red de seguridad para cuando la API
+  // aún no confirma nada; en cuanto hay dato real de ESPN, se usa ese.
+  _MATCH_MAX_DURATION_MIN: 200,
+
   
   getMatchState(m) {
     if (m.status === 'live')     return 'live';
@@ -1026,7 +1162,7 @@ const API = {
     const offset  = this._venueOffset(m.venue);
     const matchTs = new Date(`${m.date}T${m.time}:00${offset}`).getTime();
     const diffMin = (Date.now() - matchTs) / 60000;
-    if (diffMin > 115) return 'finished';
+    if (diffMin > this._MATCH_MAX_DURATION_MIN) return 'finished';
     if (diffMin > 0)   return 'live';
     if (diffMin > -60) return 'closed';        
     if (diffMin > -180) return 'starting_soon'; 
@@ -1101,25 +1237,82 @@ const API = {
   },
 
   
+  // Convierte el detalle "crudo" (del backend propio o del fallback directo
+  // a ESPN, mismo shape en ambos casos) al formato que usa la ficha de
+  // partido (MatchDetail, ver match-detail.js): nombres de equipo
+  // traducidos, banderas, y el estado/minuto ya bien formateado (entretiempo,
+  // prórroga, penales) en vez del texto crudo de ESPN.
+  _mapRawDetailToMatchDetail(raw, matchId) {
+    if (!raw) return null;
+    const status = raw.status || {};
+    const isFinished = !!status.completed || status.state === 'post';
+    const isLive = status.state === 'in' || !!status.isLive;
+
+    const homeName = translateTeamName(raw.home?.name || '');
+    const awayName = translateTeamName(raw.away?.name || '');
+    const phase = (isLive || isFinished)
+      ? _formatMatchPhase(status.description || status.detail || status.shortDetail)
+      : '';
+
+    return {
+      id: matchId,
+      home: homeName,
+      away: awayName,
+      homeFlag: getFlag(homeName),
+      awayFlag: getFlag(awayName),
+      venue: raw.venue || '',
+      status: isFinished ? 'finished' : (isLive ? 'live' : 'scheduled'),
+      phase, // "Descanso" / "Prórroga 1T" / "Penales" / "45'" / "Final" / ...
+      scoreHome: raw.home?.score != null ? Number(raw.home.score) : null,
+      scoreAway: raw.away?.score != null ? Number(raw.away.score) : null,
+      // ESPN manda el nombre de equipo en inglés en estos sub-objetos; se
+      // traduce aquí para que coincida con `home`/`away` y la UI pueda
+      // agrupar goles/estadísticas por equipo sin comparar en dos idiomas.
+      scorers: (raw.scorers || []).map(s => ({ ...s, team: translateTeamName(s.team || '') })),
+      substitutions: (raw.substitutions || []).map(s => ({ ...s, team: translateTeamName(s.team || '') })),
+      statistics: (raw.statistics || []).map(s => ({ ...s, team: translateTeamName(s.team || '') })),
+      lineups: (raw.lineups || []).map(l => ({
+        ...l,
+        team: translateTeamName(l.team || ''),
+      })),
+    };
+  },
+
   async getMatchDetail(matchId) {
-    const cacheKey = `match_${matchId}`;
+    const cacheKey = `match_detail_${matchId}`;
     const mem = this._memGet(cacheKey);
     if (mem) return mem;
+
+    const numId = String(matchId).replace('wc26_', '');
+    let raw = null;
+
     try {
-      
-      const numId = String(matchId).replace('wc26_', '');
-      const data = await this._wc26(`/get/games/${numId}`);
-      if (data) {
-        const m = Array.isArray(data) ? data[0] : (data.game || data.match || data);
-        if (m && m.id) {
-          const mapped = _applyKnownSchedule(_mapWC26Match(m));
-          return this._memSet(cacheKey, mapped, 60); 
-        }
-      }
+      const data = await this._fetch(`${WC26_BASE}/match/${numId}`, {}, { timeoutMs: 15000, retries: 1 });
+      if (data && data.success && data.data) raw = data.data;
     } catch(_) {}
+
+    if (!raw) {
+      console.warn('[API] Backend propio no disponible para el detalle enriquecido, probando ESPN directo...');
+      raw = await _fetchEspnMatchDetailDirect(numId);
+    }
+
+    if (raw) {
+      const mapped = this._mapRawDetailToMatchDetail(raw, matchId);
+      if (mapped) return this._memSet(cacheKey, mapped, 60);
+    }
+
     
+    // Sin detalle enriquecido disponible (backend y ESPN directo fallaron):
+    // devolvemos al menos lo básico que ya tengamos en la lista de partidos,
+    // para que la ficha muestre marcador/equipos aunque sea sin alineaciones.
     const all = await this.getUpcomingMatches();
-    return all.find(m => m.id === matchId) || null;
+    const basic = all.find(m => m.id === matchId);
+    if (!basic) return null;
+    return this._memSet(cacheKey, {
+      ...basic,
+      phase: basic.minute || '',
+      scorers: [], substitutions: [], statistics: [], lineups: [],
+    }, 30);
   },
 
   

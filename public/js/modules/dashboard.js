@@ -56,7 +56,8 @@ const Dashboard = {
         if (m.date && m.time) {
           const start   = new Date(`${m.date}T${m.time}:00${typeof API !== 'undefined' && API._venueOffset ? API._venueOffset(m.venue) : '-06:00'}`);
           const diffMin = (Date.now() - start.getTime()) / 60000;
-          if (diffMin > 115) continue; 
+          const maxMin  = typeof API !== 'undefined' ? API._MATCH_MAX_DURATION_MIN : 200;
+          if (diffMin > maxMin) continue; 
         }
         liveOnly.push(isLiveByTime ? { ...m, status: 'live' } : m);
       }
@@ -75,13 +76,13 @@ const Dashboard = {
       const scoreH = m.scoreHome ?? 0;
       const scoreA = m.scoreAway ?? 0;
       return `
-      <div class="match-item match-live-item has-bar" style="border-left-color:#ff4466;display:block">
+      <div class="match-item match-live-item has-bar match-item-clickable" data-match-id="${m.id}" style="border-left-color:#ff4466;display:block;cursor:pointer">
         <div style="display:flex;gap:4px;margin-bottom:4px;align-items:center">
           <span style="font-size:0.5rem;padding:1px 5px;border-radius:10px;font-weight:700;letter-spacing:1px;${badgeStyle}">
             ${isFriendly ? 'AMISTOSO' : '🏆 MUNDIAL'}
           </span>
           <span class="match-live-badge" style="font-size:0.55rem;margin-left:auto">
-            🔴 ${m.minute ? m.minute+"'" : 'EN VIVO'}
+            🔴 ${m.minute || 'EN VIVO'}
           </span>
         </div>
         <div class="match-teams-row">
@@ -91,8 +92,11 @@ const Dashboard = {
         </div>
         ${m.competition ? `<div style="font-size:0.62rem;color:var(--text-muted);margin-top:2px;text-align:center">${m.competition}</div>` : ''}
         ${m.venue ? `<div style="font-size:0.58rem;color:var(--text-muted);text-align:center">📍 ${m.venue}</div>` : ''}
+        <div style="font-size:0.58rem;color:var(--accent,#00d4ff);text-align:center;margin-top:3px;opacity:.85">Ver alineaciones y estadísticas ›</div>
       </div>`;
     }).join('');
+
+    this._bindMatchClicks(el, liveOnly);
 
     
     
@@ -150,7 +154,8 @@ const Dashboard = {
         const _off  = typeof API !== 'undefined' && API._venueOffset ? API._venueOffset(m.venue) : '-06:00';
         const start   = new Date(`${m.date}T${m.time}:00${_off}`);
         const diffMin = (Date.now() - start.getTime()) / 60000;
-        if (diffMin > 115) return { ...m, status: 'finished' };
+        const maxMin  = typeof API !== 'undefined' ? API._MATCH_MAX_DURATION_MIN : 200;
+        if (diffMin > maxMin) return { ...m, status: 'finished' };
       }
       
       
@@ -203,7 +208,7 @@ const Dashboard = {
 
       let statusBadge = '';
       if (isLive) {
-        statusBadge = `<span style="font-size:0.5rem;padding:1px 5px;border-radius:6px;background:rgba(255,68,102,0.2);color:#ff4466;font-weight:700;margin-left:2px">🔴 EN VIVO${m.minute ? ' · '+m.minute+"'" : ''}</span>`;
+        statusBadge = `<span style="font-size:0.5rem;padding:1px 5px;border-radius:6px;background:rgba(255,68,102,0.2);color:#ff4466;font-weight:700;margin-left:2px">🔴 EN VIVO${m.minute ? ' · '+m.minute : ''}</span>`;
       } else if (isFinished) {
         statusBadge = '<span style="font-size:0.5rem;padding:1px 5px;border-radius:6px;background:rgba(100,100,100,0.2);color:#888;font-weight:700;margin-left:2px">✓ FIN</span>';
       } else if (isToday) {
@@ -225,8 +230,9 @@ const Dashboard = {
       }
 
       const hasBar = isLive || isFinished || isToday;
+      const clickable = isLive || isFinished; // solo partidos jugados o en juego, como pidió el usuario
       return `
-      <div class="match-item ${hasBar ? 'has-bar' : ''}" style="${hasBar ? `border-left-color:${barColor}` : ''}">
+      <div class="match-item ${hasBar ? 'has-bar' : ''} ${clickable ? 'match-item-clickable' : ''}" ${clickable ? `data-match-id="${m.id}" style="cursor:pointer;${hasBar ? `border-left-color:${barColor}` : ''}"` : (hasBar ? `style="border-left-color:${barColor}"` : '')}>
         <div style="flex:1;min-width:0">
           <div style="display:flex;gap:4px;margin-bottom:3px;align-items:center;flex-wrap:wrap">
             <span style="font-size:0.55rem;padding:1px 5px;border-radius:10px;font-family:'Barlow Condensed',sans-serif;font-weight:700;letter-spacing:1px;${badgeStyle}">${badgeLabel}</span>
@@ -295,6 +301,22 @@ const Dashboard = {
     }
 
     el.innerHTML = html;
+    this._bindMatchClicks(el, all);
+  },
+
+  // Delegación de click compartida por renderLive() y renderUpcoming(): abre
+  // la ficha del partido (MatchDetail, ver match-detail.js) con alineaciones
+  // y estadísticas rápidas. Solo aplica a partidos en vivo o finalizados —
+  // los que aún no arrancan no tienen nada que mostrar todavía.
+  _bindMatchClicks(container, matches) {
+    if (!container || typeof MatchDetail === 'undefined') return;
+    const byId = new Map((matches || []).map(m => [String(m.id), m]));
+    container.querySelectorAll('[data-match-id]').forEach(card => {
+      card.addEventListener('click', () => {
+        const id = card.dataset.matchId;
+        MatchDetail.open(id, byId.get(id) || null);
+      });
+    });
   },
 
   _tomorrowStr() {
