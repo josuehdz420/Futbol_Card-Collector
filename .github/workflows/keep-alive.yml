@@ -1,0 +1,34 @@
+name: Keep-alive backend (Render)
+
+# Hace ping periódico al backend en Render para evitar que el plan gratis
+# lo duerma por inactividad (Render "duerme" los servicios free tras ~15
+# minutos sin tráfico, y el primer request tras dormir puede tardar bastante).
+#
+# CONFIGURACIÓN REQUERIDA:
+#   Reemplaza el placeholder de abajo (RENDER_API_URL) con la URL real de tu
+#   API en Render, por ejemplo: https://mi-app.onrender.com
+#
+#   Opción A (rápida): edita directamente la línea "url:" más abajo.
+#   Opción B (recomendada): define una variable de repositorio llamada
+#   RENDER_API_URL en GitHub → Settings → Secrets and variables → Actions →
+#   Variables, y este workflow la usará automáticamente sin tocar el código.
+
+on:
+  schedule:
+    # Cada 10 minutos. La sintaxis cron de GitHub Actions usa UTC.
+    - cron: '*/10 * * * *'
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping backend para mantenerlo despierto
+        env:
+          # Si defines la variable de repositorio RENDER_API_URL se usa esa;
+          # si no, cae en el placeholder (reemplázalo si no vas a usar la
+          # variable de repositorio).
+          RENDER_API_URL: ${{ vars.RENDER_API_URL || 'https://TU-APP.onrender.com' }}
+        run: |
+          echo "Haciendo ping a: $RENDER_API_URL"
+          curl -fsS --max-time 30 "$RENDER_API_URL/" || echo "⚠️ El ping falló (puede ser normal si el backend estaba despertando)."

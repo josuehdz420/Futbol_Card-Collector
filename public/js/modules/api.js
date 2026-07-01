@@ -21,9 +21,10 @@ function _espnDateRangeYYYYMMDD() {
 const USE_MOCK_ONLY = false;
 
 const API_STATUS = {
-  usingMock:   false,
-  lastError:   null,
-  lastSuccess: null,
+  usingMock:        false,
+  lastError:        null,
+  lastSuccess:      null,
+  usedEspnFallback: false, // true si la última respuesta vino del respaldo directo a ESPN (backend propio caído)
 };
 
 const TEAM_FLAGS = {
@@ -424,6 +425,105 @@ function _espnToLegacyGame(espnMatch) {
   };
 }
 
+// --- Respaldo de EMERGENCIA: consulta directa a ESPN desde el navegador ---
+// SOLO se usa como último recurso si nuestro propio backend (server/, en
+// Render) falla incluso después del reintento de _fetch. No reemplaza al
+// backend propio ni cambia la arquitectura: es simplemente un intento extra
+// antes de caer a los datos mock. Misma fuente y misma lógica de
+// normalización que usa server/src/services/espnService.js.
+const ESPN_DIRECT_BASE = 'https://site.api.espn.com/apis/site/v2/sports/soccer';
+
+async function _fetchEspnDirect(url, timeoutMs = 12000) {
+  try {
+    const ctrl  = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    const res   = await fetch(url, { signal: ctrl.signal });
+    clearTimeout(timer);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch(err) {
+    console.warn('[API][ESPN fallback]', url.split('?')[0], '-', err.message);
+    return null;
+  }
+}
+
+// Réplica de espnService.js::normalizeEvent (mismo formato de salida) para
+// poder reusar _espnToLegacyGame/_mapWC26Match sin tocar el resto del flujo.
+function _normalizeEspnEventDirect(event, leagueId) {
+  const competition = event.competitions?.[0];
+  const home = competition?.competitors?.find(c => c.homeAway === 'home');
+  const away = competition?.competitors?.find(c => c.homeAway === 'away');
+  const status = event.status?.type || {};
+  const note = competition?.notes?.[0]?.headline || event.season?.slug || null;
+
+  return {
+    id: event.id,
+    league: leagueId,
+    date: event.date,
+    round: note,
+    status: {
+      state: status.state,
+      detail: status.detail,
+      shortDetail: status.shortDetail,
+      isLive: status.state === 'in',
+      completed: !!status.completed,
+    },
+    venue: competition?.venue?.fullName || null,
+    home: home ? {
+      id: home.team?.id, name: home.team?.displayName, shortName: home.team?.shortDisplayName,
+      logo: home.team?.logo, score: home.score ?? null, winner: !!home.winner,
+    } : null,
+    away: away ? {
+      id: away.team?.id, name: away.team?.displayName, shortName: away.team?.shortDisplayName,
+      logo: away.team?.logo, score: away.score ?? null, winner: !!away.winner,
+    } : null,
+  };
+}
+
+// Equivalente directo a espnService.js::getScoreboardRange, pero llamado
+// desde el navegador. Devuelve partidos ya normalizados (mismo shape que
+// nuestro backend), listos para pasar por _espnToLegacyGame.
+async function _fetchEspnGamesDirect(fromStr, toStr) {
+  const url  = `${ESPN_DIRECT_BASE}/${ESPN_WC_LEAGUE}/scoreboard?dates=${fromStr}-${toStr}`;
+  const data = await _fetchEspnDirect(url);
+  const events = data?.events || [];
+  return events.map(ev => _normalizeEspnEventDirect(ev, ESPN_WC_LEAGUE));
+}
+
+// Equivalente directo a espnService.js::getMatchById (versión simplificada:
+// solo prueba la liga del Mundial, ya que es la única que usa el frontend).
+async function _fetchEspnMatchDirect(matchId) {
+  const url  = `${ESPN_DIRECT_BASE}/${ESPN_WC_LEAGUE}/summary?event=${matchId}`;
+  const data = await _fetchEspnDirect(url);
+  if (!data || (!data.header && !data.boxscore)) return null;
+
+  const header      = data.header;
+  const competition = header?.competitions?.[0];
+  const home = competition?.competitors?.find(c => c.homeAway === 'home');
+  const away = competition?.competitors?.find(c => c.homeAway === 'away');
+
+  return {
+    id: matchId,
+    league: ESPN_WC_LEAGUE,
+    date: competition?.date || null,
+    status: {
+      state: competition?.status?.type?.state,
+      detail: competition?.status?.type?.detail,
+      isLive: competition?.status?.type?.state === 'in',
+      completed: !!competition?.status?.type?.completed,
+    },
+    venue: data.gameInfo?.venue?.fullName || null,
+    home: home ? {
+      id: home.team?.id, name: home.team?.displayName,
+      logo: home.team?.logos?.[0]?.href, score: home.score ?? null,
+    } : null,
+    away: away ? {
+      id: away.team?.id, name: away.team?.displayName,
+      logo: away.team?.logos?.[0]?.href, score: away.score ?? null,
+    } : null,
+  };
+}
+
 function _mapWC26Match(m) {
   
   
@@ -578,22 +678,42 @@ const API = {
   },
 
   
-  async _fetch(url, headers = {}) {
-    try {
-      const ctrl  = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 8000);
-      const res   = await fetch(url, { headers, signal: ctrl.signal });
-      clearTimeout(timer);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      API_STATUS.lastError   = null;
-      API_STATUS.lastSuccess = Date.now();
-      return data;
-    } catch(err) {
-      if (!API_STATUS.lastError) API_STATUS.lastError = 'network';
-      console.warn('[API]', url.split('?')[0], '-', err.message);
-      return null;
+  // opts.timeoutMs: timeout por intento (default 15s, el plan gratis de
+  // Render tarda en "despertar" tras estar inactivo).
+  // opts.retries: reintentos adicionales tras el primer intento (default 1).
+  // opts.retryDelayMs: pausa antes de reintentar (default ~4s), para darle
+  // tiempo al backend de terminar de despertar.
+  async _fetch(url, headers = {}, opts = {}) {
+    const { timeoutMs = 15000, retries = 1, retryDelayMs = 4000 } = opts;
+
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        const ctrl  = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+        const res   = await fetch(url, { headers, signal: ctrl.signal });
+        clearTimeout(timer);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        API_STATUS.lastError   = null;
+        API_STATUS.lastSuccess = Date.now();
+        return data;
+      } catch(err) {
+        const isLastAttempt = attempt === retries;
+        console.warn(
+          '[API]', url.split('?')[0],
+          `- intento ${attempt + 1}/${retries + 1} falló:`, err.message
+        );
+        if (!isLastAttempt) {
+          // Probable "cold start" del backend en Render (plan gratis):
+          // esperamos un poco antes de reintentar una sola vez.
+          await new Promise(r => setTimeout(r, retryDelayMs));
+          continue;
+        }
+        if (!API_STATUS.lastError) API_STATUS.lastError = 'network';
+        return null;
+      }
     }
+    return null;
   },
 
   
@@ -604,16 +724,41 @@ const API = {
     if (endpoint === '/get/games') {
       const { from, to } = _espnDateRangeYYYYMMDD();
       const data = await this._fetch(`${WC26_BASE}/matches?league=${ESPN_WC_LEAGUE}&from=${from}&to=${to}`);
-      if (!data || !data.success) return null;
-      return (data.data || []).map(_espnToLegacyGame).filter(Boolean);
+      if (data && data.success) {
+        API_STATUS.usedEspnFallback = false;
+        return (data.data || []).map(_espnToLegacyGame).filter(Boolean);
+      }
+
+      // Nuestro backend no respondió ni con el reintento (posible caída o
+      // "cold start" prolongado de Render). Último recurso antes de los
+      // mocks: consultar ESPN directo desde el navegador.
+      console.warn('[API] Backend propio no disponible, probando ESPN directo como último recurso...');
+      const espnEvents = await _fetchEspnGamesDirect(from, to);
+      if (espnEvents.length > 0) {
+        API_STATUS.usedEspnFallback = true;
+        API_STATUS.lastError = null;
+        return espnEvents.map(_espnToLegacyGame).filter(Boolean);
+      }
+      return null;
     }
 
     // GET /get/games/:id -> detalle de un partido específico
     if (endpoint.startsWith('/get/games/')) {
       const id = endpoint.split('/').pop();
       const data = await this._fetch(`${WC26_BASE}/match/${id}`);
-      if (!data || !data.success || !data.data) return null;
-      return [_espnToLegacyGame(data.data)];
+      if (data && data.success && data.data) {
+        API_STATUS.usedEspnFallback = false;
+        return [_espnToLegacyGame(data.data)];
+      }
+
+      console.warn('[API] Backend propio no disponible para el detalle, probando ESPN directo...');
+      const espnMatch = await _fetchEspnMatchDirect(id);
+      if (espnMatch) {
+        API_STATUS.usedEspnFallback = true;
+        API_STATUS.lastError = null;
+        return [_espnToLegacyGame(espnMatch)];
+      }
+      return null;
     }
 
     // GET /get/stadiums -> no soportado por la nueva API, se usa el fallback
@@ -1073,7 +1218,8 @@ const API = {
     return {
       apiFootball:  { enabled: false, hasKey: false },
       footballData: { enabled: false, hasKey: false },
-      sportsDB:     { enabled: false, hasKey: false }
+      sportsDB:     { enabled: false, hasKey: false },
+      espnFallback: { used: API_STATUS.usedEspnFallback } // último recurso: ESPN directo desde el navegador
     };
   }
 };
