@@ -769,116 +769,100 @@ const API = {
   },
 
   
+  // --- Endpoints con estrategia stale-while-revalidate (Cache, ver
+  // swr-cache.js): se devuelve el último dato guardado (memoria/IndexedDB)
+  // de inmediato, y la red se consulta en background. Si no hay NADA
+  // guardado todavía (primer arranque), esa primera vez sí se espera a la
+  // red o al mock. usingMock queda como estaba: refleja la última fuente
+  // real usada, se actualiza dentro del fetcher cuando corresponde. ---
+
+  async _fetchLiveFromNetwork() {
+    const data = await this._wc26('/get/games');
+    if (!data) return null;
+    const games = Array.isArray(data) ? data : (data.games || data.matches || data.data || []);
+    const live  = games
+      .filter(m => {
+        const te = (m.time_elapsed || '').toLowerCase();
+        return String(m.finished).toUpperCase() !== 'TRUE' && te !== '' && te !== 'notstarted';
+      })
+      .map(m => _applyKnownSchedule(_mapWC26Match(m)));
+    API_STATUS.usingMock = false;
+    return live;
+  },
+
   async getLiveMatches() {
-    const mem = this._memGet('live');
-    if (mem) return mem;
-
-    const data = await this._wc26('/get/games');
-    if (data) {
-      const games = Array.isArray(data) ? data : (data.games || data.matches || data.data || []);
-      const live  = games
-        .filter(m => {
-          const te = (m.time_elapsed || '').toLowerCase();
-          return String(m.finished).toUpperCase() !== 'TRUE' && te !== '' && te !== 'notstarted';
-        })
-        .map(m => _applyKnownSchedule(_mapWC26Match(m)));
-      API_STATUS.usingMock = false;
-      return this._memSet('live', live);
-    }
-
+    const result = await Cache.swr('live', () => this._fetchLiveFromNetwork(), { ttl: this._TTL.live });
+    if (result) return result;
     API_STATUS.usingMock = true;
-    return this._memSet('live', MOCK.liveMatches);
+    return MOCK.liveMatches;
   },
 
   
+  async _fetchUpcomingFromNetwork() {
+    const yestStr = yesterdayStr();
+    const data = await this._wc26('/get/games');
+    if (!data) return null;
+    const games = Array.isArray(data) ? data : (data.games || data.matches || data.data || []);
+    const mapped = games
+      .map(m => _applyKnownSchedule(_mapWC26Match(m)))
+      .filter(m => m.date >= yestStr)
+      .sort((a, b) => {
+        if (a.status === 'live' && b.status !== 'live') return -1;
+        if (b.status === 'live' && a.status !== 'live') return  1;
+        return ((a.date||'')+(a.time||'')) < ((b.date||'')+(b.time||'')) ? -1 : 1;
+      });
+
+    if (mapped.length === 0) return null;
+    API_STATUS.usingMock = false;
+    return mapped;
+  },
+
   async getUpcomingMatches() {
-    const mem = this._memGet('upcoming');
-    if (mem) return mem;
-    const ls = this._lsGet('upcoming');
-    if (ls) return this._memSet('upcoming', ls);
-
-    const todayStr = localDateStr();
-    const yestStr  = yesterdayStr();
-
-    const data = await this._wc26('/get/games');
-    if (data) {
-      const games = Array.isArray(data) ? data : (data.games || data.matches || data.data || []);
-      const mapped = games
-        .map(m => _applyKnownSchedule(_mapWC26Match(m)))
-        .filter(m => m.date >= yestStr)
-        .sort((a, b) => {
-          if (a.status === 'live' && b.status !== 'live') return -1;
-          if (b.status === 'live' && a.status !== 'live') return  1;
-          return ((a.date||'')+(a.time||'')) < ((b.date||'')+(b.time||'')) ? -1 : 1;
-        });
-
-      if (mapped.length > 0) {
-        API_STATUS.usingMock = false;
-        this._lsSet('upcoming', mapped);
-        return this._memSet('upcoming', mapped);
-      }
-    }
-
+    const result = await Cache.swr('upcoming', () => this._fetchUpcomingFromNetwork(), { ttl: this._TTL.upcoming });
+    if (result) return result;
     API_STATUS.usingMock = true;
-    return this._memSet('upcoming', MOCK.upcomingMatches);
+    return MOCK.upcomingMatches;
   },
 
   
+  async _fetchFinishedFromNetwork() {
+    const data = await this._wc26('/get/games');
+    if (!data) return null;
+    const games = Array.isArray(data) ? data : (data.games || data.matches || data.data || []);
+    const finished = games
+      .filter(m => String(m.finished).toUpperCase() === 'TRUE')
+      .map(m => {
+        const base = _applyKnownSchedule(_mapWC26Match(m));
+        const h = Number(m.home_score ?? 0), a = Number(m.away_score ?? 0);
+        return {
+          ...base,
+          scoreHome:   h,
+          scoreAway:   a,
+          exactScore:  `${h}-${a}`,
+          finalResult: h > a ? 'home' : a > h ? 'away' : 'draw',
+        };
+      })
+      .sort((a, b) => (b.date||'') > (a.date||'') ? 1 : -1);
+
+    if (finished.length === 0) return null;
+    API_STATUS.usingMock = false;
+    return finished;
+  },
+
   async getFinishedMatches() {
-    const mem = this._memGet('finished');
-    if (mem) return mem;
-
-    const data = await this._wc26('/get/games');
-    if (data) {
-      const games = Array.isArray(data) ? data : (data.games || data.matches || data.data || []);
-      const finished = games
-        .filter(m => String(m.finished).toUpperCase() === 'TRUE')
-        .map(m => {
-          const base = _applyKnownSchedule(_mapWC26Match(m));
-          const h = Number(m.home_score ?? 0), a = Number(m.away_score ?? 0);
-          return {
-            ...base,
-            scoreHome:   h,
-            scoreAway:   a,
-            exactScore:  `${h}-${a}`,
-            finalResult: h > a ? 'home' : a > h ? 'away' : 'draw',
-          };
-        })
-        .sort((a, b) => (b.date||'') > (a.date||'') ? 1 : -1);
-
-      if (finished.length > 0) {
-        API_STATUS.usingMock = false;
-        return this._memSet('finished', finished);
-      }
-    }
-
+    const result = await Cache.swr('finished', () => this._fetchFinishedFromNetwork(), { ttl: this._TTL.finished });
+    if (result) return result;
     API_STATUS.usingMock = true;
-    return this._memSet('finished', MOCK.finishedMatches);
+    return MOCK.finishedMatches;
   },
 
   
-  async getStandings() {
-    const mem = this._memGet('standings');
-    if (mem) return mem;
-
-    
-    
+  async _computeStandings() {
     let finished = [];
     try { finished = await this.getFinishedMatches(); } catch(_) {}
 
     
-    if (!finished || finished.length === 0) {
-      const mockRows = MOCK.standings.slice();
-      const groups = {};
-      mockRows.forEach(s => (groups[s.group] = groups[s.group] || []).push(s));
-      const sorted = [];
-      Object.values(groups).forEach(arr => {
-        arr.sort((x,y) => y.pts - x.pts || (y.gf-y.gc)-(x.gf-x.gc) || y.gf-x.gf);
-        arr.forEach((s,i) => { s.pos = i+1; sorted.push(s); });
-      });
-      API_STATUS.usingMock = true;
-      return this._memSet('standings', sorted);
-    }
+    if (!finished || finished.length === 0) return null;
 
     
     const base = MOCK.standings.map(s => ({ ...s, pj:0, w:0, d:0, l:0, gf:0, gc:0, pts:0 }));
@@ -908,8 +892,28 @@ const API = {
       arr.forEach((s, i) => { s.pos = i + 1; rows.push(s); });
     });
 
-    API_STATUS.usingMock = rows.every(r => r.pj === 0);
-    return this._memSet('standings', rows);
+    if (rows.every(r => r.pj === 0)) return null; // sin datos reales aún, que caiga a mock
+    API_STATUS.usingMock = false;
+    return rows;
+  },
+
+  _mockStandings() {
+    const mockRows = MOCK.standings.slice();
+    const groups = {};
+    mockRows.forEach(s => (groups[s.group] = groups[s.group] || []).push(s));
+    const sorted = [];
+    Object.values(groups).forEach(arr => {
+      arr.sort((x,y) => y.pts - x.pts || (y.gf-y.gc)-(x.gf-x.gc) || y.gf-x.gf);
+      arr.forEach((s,i) => { s.pos = i+1; sorted.push(s); });
+    });
+    return sorted;
+  },
+
+  async getStandings() {
+    const result = await Cache.swr('standings', () => this._computeStandings(), { ttl: this._TTL.standings });
+    if (result) return result;
+    API_STATUS.usingMock = true;
+    return this._mockStandings();
   },
 
   
@@ -1142,10 +1146,14 @@ const API = {
     this._memCache  = {};
     this._teamsCache = null;
     this._invalidateOldCache();
-    localStorage.removeItem(this._lsCacheKey('upcoming'));
-    localStorage.removeItem(this._lsCacheKey('standings'));
     localStorage.removeItem(this._lsCacheKey('teams'));
-    localStorage.removeItem(this._lsCacheKey('finished'));
+
+    // Con el sistema stale-while-revalidate la UI ya se mantiene fresca
+    // sola en background — este botón queda como "forzar ahora mismo",
+    // ya no es indispensable para ver datos actualizados.
+    if (typeof Cache !== 'undefined') {
+      await Cache.invalidateAll(['live', 'upcoming', 'standings', 'finished']);
+    }
 
     try {
       const [live, upcoming, standings, finished] = await Promise.all([
@@ -1225,3 +1233,19 @@ const API = {
 };
 
 API._init();
+
+// Cuando 'finished' se revalida en background con datos nuevos, la tabla de
+// posiciones ('standings') depende de esos resultados: la recalculamos y
+// emitimos su propio 'wcc:cache-update' para que la UI (dashboard, stats)
+// se refresque sola sin esperar su propio TTL.
+if (typeof Cache !== 'undefined' && Cache.on) {
+  Cache.on('finished', async () => {
+    try {
+      const rows = await API._computeStandings();
+      if (rows) {
+        Cache.set('standings', rows);
+        Cache._emit('standings', rows);
+      }
+    } catch (_) { /* no crítico, standings se recalcula en su propio TTL igual */ }
+  });
+}

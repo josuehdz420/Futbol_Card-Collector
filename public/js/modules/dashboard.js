@@ -98,12 +98,18 @@ const Dashboard = {
     
     if (!this._liveRefreshTimer) {
       this._liveRefreshTimer = API.registerTimer(async () => {
-        
-        delete API._memCache['live'];
-        delete API._memCache['upcoming'];
-        this.renderLive();
-        this.renderUpcoming();
-        
+        // Con stale-while-revalidate ya no hace falta borrar el caché a
+        // mano: forzamos una revalidación en background (los datos que se
+        // ven ahora mismo no desaparecen mientras llega lo nuevo) y
+        // dejamos que 'wcc:cache-update' dispare el re-render solo.
+        if (typeof Cache !== 'undefined') {
+          Cache.swr('live',     () => API._fetchLiveFromNetwork(),     { ttl: API._TTL.live,     forceNetwork: true });
+          Cache.swr('upcoming', () => API._fetchUpcomingFromNetwork(), { ttl: API._TTL.upcoming, forceNetwork: true });
+        } else {
+          this.renderLive();
+          this.renderUpcoming();
+        }
+
         try {
           const allMatches = await API.getUpcomingMatches();
           if (typeof Predictions !== 'undefined') {

@@ -13,7 +13,7 @@
 // viven aquí — viven en Firestore, gestionados desde auth.js.
 
 const DB_NAME    = 'WCCollectorUES_cache';
-const DB_VERSION = 1;
+const DB_VERSION = 2; // v2: agrega 'swr_cache' para persistencia stale-while-revalidate (ver swr-cache.js)
 
 let _db     = null;
 let _dbProm = null;
@@ -47,6 +47,9 @@ const DB = {
         };
         ensure('stats_cache', { keyPath: 'key' });
         ensure('photo_cache', { keyPath: 'id' });
+        // Caché persistente para el sistema stale-while-revalidate (matches,
+        // standings, dashboard, live data). Ver public/js/utils/swr-cache.js
+        ensure('swr_cache', { keyPath: 'key' });
       };
 
       req.onsuccess = (e) => {

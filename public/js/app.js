@@ -43,7 +43,18 @@ const App = {
 
     let user = null;
     try {
-      user = await Auth.recoverSession();
+      // La sesión y el pre-calentado de la caché SWR (matches, standings,
+      // live, dashboard) no dependen entre sí: se resuelven en paralelo
+      // para no sumar latencia. Preload() lee lo último guardado en
+      // IndexedDB hacia memoria, así el primer Dashboard.render() ya
+      // encuentra datos listos y no espera a la red.
+      const [recoveredUser] = await Promise.all([
+        Auth.recoverSession(),
+        (typeof Cache !== 'undefined'
+          ? Cache.preload(['live', 'upcoming', 'standings', 'finished'])
+          : Promise.resolve())
+      ]);
+      user = recoveredUser;
     } catch(e) {
       console.error('recoverSession falló:', e);
     }
@@ -74,7 +85,47 @@ const App = {
 
     this._bindNavEvents();
     this._bindGlobalEvents();
+    this._bindDataSyncEvents();
     this._showInitialApiKeyInfo();
+  },
+
+  // Escucha las actualizaciones que llegan en background por el sistema
+  // stale-while-revalidate (Cache, ver swr-cache.js) y refresca solo la
+  // pestaña visible en ese momento, sin recargar la página ni interrumpir
+  // al usuario. Así se reduce la dependencia del botón manual "Actualizar":
+  // los datos se mantienen frescos solos mientras la app está abierta.
+  _bindDataSyncEvents() {
+    if (this._dataSyncBound) return;
+    this._dataSyncBound = true;
+
+    window.addEventListener('wcc:cache-update', async (e) => {
+      const key = e?.detail?.key;
+      if (!key) return;
+
+      try {
+        if (['live', 'upcoming', 'standings'].includes(key) && this._currentTab === 'dashboard') {
+          // Dashboard.render() vuelve a leer de API.getXxx(), que ahora
+          // sirve el dato recién cacheado sin ir a red de nuevo.
+          Dashboard.render();
+        }
+
+        if (key === 'finished') {
+          const finished = await API.getFinishedMatches();
+          if (finished?.length && typeof Predictions !== 'undefined') {
+            await Predictions.evaluatePredictions(finished);
+          }
+          if (this._currentTab === 'predictions' && typeof Predictions !== 'undefined') {
+            Predictions.render();
+          }
+        }
+
+        if (['standings', 'finished'].includes(key) && this._currentTab === 'stats' && typeof Stats !== 'undefined') {
+          Stats.render(Stats._currentTab || 'teams');
+        }
+      } catch (err) {
+        console.warn('[App] sync en background falló para', key, err);
+      }
+    });
   },
 
   _showInitialApiKeyInfo() {
