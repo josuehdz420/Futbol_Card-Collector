@@ -28,7 +28,7 @@ jobs:
           # Si defines la variable de repositorio RENDER_API_URL se usa esa;
           # si no, cae en el placeholder (reemplázalo si no vas a usar la
           # variable de repositorio).
-          RENDER_API_URL: ${{ vars.RENDER_API_URL || 'https://TU-APP.onrender.com' }}
+          RENDER_API_URL: ${{ vars.RENDER_API_URL || 'https://futbol-card-collector-api.onrender.com' }}
         run: |
           echo "Haciendo ping a: $RENDER_API_URL"
           curl -fsS --max-time 30 "$RENDER_API_URL/" || echo "⚠️ El ping falló (puede ser normal si el backend estaba despertando)."

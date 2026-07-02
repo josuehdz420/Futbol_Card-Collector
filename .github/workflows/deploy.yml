@@ -30,6 +30,12 @@ jobs:
         run: npm install
 
       - name: Build with Astro
+        env:
+          # Se puede sobreescribir definiendo la variable de repositorio
+          # PUBLIC_API_URL en GitHub → Settings → Secrets and variables →
+          # Actions → Variables. Si no se define, AppHead.astro usa el
+          # fallback ya hardcodeado con la URL real de Render.
+          PUBLIC_API_URL: ${{ vars.PUBLIC_API_URL }}
         run: npm run build
 
       - name: Upload Pages artifact

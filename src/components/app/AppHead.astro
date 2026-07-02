@@ -1,9 +1,16 @@
-<script is:inline>
-  // Define aquí la URL pública de tu API (Render, Railway, Fly.io, etc.)
-  // antes de desplegar. En localhost se usa automáticamente localhost:3001.
+---
+// URL pública del backend en producción. Se puede sobreescribir en build
+// definiendo la variable de entorno PUBLIC_API_URL (ej. en el workflow de
+// GitHub Actions, como repo variable). Si no se define, cae en la URL real
+// de Render ya desplegada.
+const PUBLIC_API_BASE = import.meta.env.PUBLIC_API_URL || 'https://futbol-card-collector-api.onrender.com';
+---
+<script is:inline define:vars={{ PUBLIC_API_BASE }}>
+  // En localhost se usa automáticamente localhost:3001. En cualquier otro
+  // host (GitHub Pages, etc.) se usa la URL inyectada en build time.
   window.__API_BASE__ = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
     ? 'http://localhost:3001'
-    : 'https://futbol-card-collector-api.onrender.com';
+    : PUBLIC_API_BASE;
 </script>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>

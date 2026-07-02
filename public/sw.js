@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'wcc-ues-v19';
+const CACHE_VERSION = 'wcc-ues-v20';
 const BASE = '/Futbol_Card-Collector';
 
 const STATIC_ASSETS = [
@@ -66,6 +66,10 @@ self.addEventListener('fetch', e => {
 
   const isAppShell = STATIC_ASSETS.some(a => url.endsWith(a) || url.includes(a));
   const isImage    = /\.(png|jpg|jpeg|svg|webp|gif|ico)(\?.*)?$/.test(url);
+  // JS/CSS deben revalidarse siempre contra el servidor (nunca servirse desde
+  // el caché HTTP del navegador) para que un deploy nuevo se refleje de
+  // inmediato; el Cache Storage de abajo sigue funcionando para offline.
+  const isCodeAsset = /\.(js|css)(\?.*)?$/.test(url);
 
   if (isImage) {
     
@@ -86,7 +90,7 @@ self.addEventListener('fetch', e => {
 
  
   e.respondWith(
-    fetch(e.request)
+    fetch(e.request, isCodeAsset ? { cache: 'no-store' } : undefined)
       .then(response => {
        
         if (response && response.status === 200 && response.type !== 'opaque') {

@@ -575,6 +575,24 @@ async function _fetchEspnMatchDirect(matchId) {
   };
 }
 
+// --- Réplica en el navegador de las funciones equivalentes en
+// server/src/services/espnService.js. Extraen SOLO el nombre del jugador
+// desde la prosa editorial de ESPN, nunca exponen el resto del texto.
+function _extractGoalPlayer(text) {
+  if (!text) return null;
+  const afterScoreline = String(text).replace(/^Goal!\s*[^.]*\.\s*/i, "");
+  const m = afterScoreline.match(/^([^(]+?)\s*\(/);
+  return m ? m[1].trim() : null;
+}
+
+function _extractSubPlayers(text) {
+  if (!text) return null;
+  const afterTeam = String(text).replace(/^Substitution,\s*[^.]*\.\s*/i, "");
+  const m = afterTeam.match(/^(.+?)\s+replaces\s+(.+?)\.?\s*$/i);
+  if (!m) return null;
+  return { playerIn: m[1].trim(), playerOut: m[2].trim() };
+}
+
 // Igual que getMatchById en espnService.js pero llamado directo desde el
 // navegador (último recurso si nuestro backend propio no responde). Trae
 // el detalle "enriquecido" completo: goleadores, cambios, estadísticas y
@@ -618,7 +636,7 @@ async function _fetchEspnMatchDetailDirect(matchId) {
     scorers: (data.keyEvents || [])
       .filter(ev => /goal/i.test(ev.type?.text || ''))
       .map(ev => ({
-        player: ev.athletesInvolved?.[0]?.displayName || ev.text?.split(' - ')?.[0] || null,
+        player: ev.athletesInvolved?.[0]?.displayName || _extractGoalPlayer(ev.text) || null,
         clock: ev.clock?.displayValue || null,
         team: ev.team?.displayName || null,
         ownGoal: /own goal/i.test(ev.type?.text || ''),
@@ -626,12 +644,15 @@ async function _fetchEspnMatchDetailDirect(matchId) {
       })),
     substitutions: (data.keyEvents || [])
       .filter(ev => /subst/i.test(ev.type?.text || ''))
-      .map(ev => ({
-        clock: ev.clock?.displayValue || null, team: ev.team?.displayName || null,
-        playerIn: ev.athletesInvolved?.[0]?.displayName || null,
-        playerOut: ev.athletesInvolved?.[1]?.displayName || null,
-        text: ev.text || null,
-      })),
+      .map(ev => {
+        const parsed = _extractSubPlayers(ev.text);
+        return {
+          clock: ev.clock?.displayValue || null, team: ev.team?.displayName || null,
+          playerIn: ev.athletesInvolved?.[0]?.displayName || parsed?.playerIn || null,
+          playerOut: ev.athletesInvolved?.[1]?.displayName || parsed?.playerOut || null,
+          text: ev.text || null,
+        };
+      }),
     statistics: (data.boxscore?.teams || []).map(t => ({
       team: t.team?.displayName,
       stats: (t.statistics || []).map(s => ({
