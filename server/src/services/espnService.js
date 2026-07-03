@@ -273,6 +273,28 @@ function _extractGoalPlayer(text) {
   return m ? m[1].trim() : null;
 }
 
+// --- Extrae SOLO el nombre de quien dio la asistencia, si ESPN lo incluye
+// en la prosa del gol ("... assisted by Nombre Jugador."). Nunca expone el
+// resto del texto; si no matchea el patrón, devuelve null. ---
+function _extractAssistPlayer(text) {
+  if (!text) return null;
+  const m = String(text).match(/assisted by\s+([^.,]+)/i);
+  return m ? m[1].trim() : null;
+}
+
+// --- Extrae SOLO el nombre del jugador amonestado/expulsado desde la
+// prosa de un evento de tarjeta. Formatos típicos de ESPN:
+// "Yellow Card - Nombre Jugador (Equipo)." o
+// "Nombre Jugador (Equipo) is shown the yellow card."
+// Nunca expone el resto del texto; si no matchea, devuelve null. ---
+function _extractCardPlayer(text) {
+  if (!text) return null;
+  const dash = String(text).match(/^(?:Yellow|Red)\s*Card\s*-\s*([^(]+?)\s*\(/i);
+  if (dash) return dash[1].trim();
+  const receives = String(text).match(/^([^(]+?)\s*\([^)]*\)\s*(?:receives|is shown)/i);
+  return receives ? receives[1].trim() : null;
+}
+
 // --- Detecta si un keyEvent de ESPN es un gol válido. Antes solo se
 // aceptaba texto con la palabra "goal", así que penales convertidos que
 // ESPN reporta como "Penalty Scored"/"Penalty - Converted" (sin la
@@ -384,10 +406,22 @@ async function getMatchById(matchId) {
           .filter((ev) => _isScoringEvent(ev.type?.text))
           .map((ev) => ({
             player: ev.athletesInvolved?.[0]?.displayName || _extractGoalPlayer(ev.text) || null,
+            assist: ev.athletesInvolved?.[1]?.displayName || _extractAssistPlayer(ev.text) || null,
             clock: ev.clock?.displayValue || null,
             team: ev.team?.displayName || null,
             ownGoal: /own goal/i.test(ev.type?.text || ""),
             penalty: /penalty/i.test(ev.type?.text || "")
+          })),
+        // Tarjetas (amarilla/roja/doble amarilla), mismo criterio que goles
+        // y cambios: nunca se expone la prosa completa de ESPN, solo el
+        // nombre del jugador extraído (vía athletesInvolved o regex).
+        cards: (data.keyEvents || [])
+          .filter((ev) => /(yellow|red)\s*card|second yellow/i.test(ev.type?.text || ""))
+          .map((ev) => ({
+            player: ev.athletesInvolved?.[0]?.displayName || _extractCardPlayer(ev.text) || null,
+            clock: ev.clock?.displayValue || null,
+            team: ev.team?.displayName || null,
+            red: /red card|second yellow/i.test(ev.type?.text || "")
           })),
         // Cambios (si ESPN los reporta como keyEvent de sustitución). Mismo
         // criterio: si no hay "athletesInvolved" se extraen los dos nombres

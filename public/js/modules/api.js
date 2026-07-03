@@ -595,6 +595,21 @@ function _extractGoalPlayer(text) {
   return m ? m[1].trim() : null;
 }
 
+// --- Réplica de _extractAssistPlayer / _extractCardPlayer en espnService.js ---
+function _extractAssistPlayer(text) {
+  if (!text) return null;
+  const m = String(text).match(/assisted by\s+([^.,]+)/i);
+  return m ? m[1].trim() : null;
+}
+
+function _extractCardPlayer(text) {
+  if (!text) return null;
+  const dash = String(text).match(/^(?:Yellow|Red)\s*Card\s*-\s*([^(]+?)\s*\(/i);
+  if (dash) return dash[1].trim();
+  const receives = String(text).match(/^([^(]+?)\s*\([^)]*\)\s*(?:receives|is shown)/i);
+  return receives ? receives[1].trim() : null;
+}
+
 function _extractSubPlayers(text) {
   if (!text) return null;
   const afterTeam = String(text).replace(/^Substitution,\s*[^.]*\.\s*/i, "");
@@ -664,10 +679,19 @@ async function _fetchEspnMatchDetailDirect(matchId) {
       .filter(ev => _isScoringEvent(ev.type?.text))
       .map(ev => ({
         player: ev.athletesInvolved?.[0]?.displayName || _extractGoalPlayer(ev.text) || null,
+        assist: ev.athletesInvolved?.[1]?.displayName || _extractAssistPlayer(ev.text) || null,
         clock: ev.clock?.displayValue || null,
         team: ev.team?.displayName || null,
         ownGoal: /own goal/i.test(ev.type?.text || ''),
         penalty: /penalty/i.test(ev.type?.text || ''),
+      })),
+    cards: (data.keyEvents || [])
+      .filter(ev => /(yellow|red)\s*card|second yellow/i.test(ev.type?.text || ''))
+      .map(ev => ({
+        player: ev.athletesInvolved?.[0]?.displayName || _extractCardPlayer(ev.text) || null,
+        clock: ev.clock?.displayValue || null,
+        team: ev.team?.displayName || null,
+        red: /red card|second yellow/i.test(ev.type?.text || ''),
       })),
     substitutions: (data.keyEvents || [])
       .filter(ev => /subst/i.test(ev.type?.text || ''))
@@ -1321,6 +1345,7 @@ const API = {
       // agrupar goles/estadísticas por equipo sin comparar en dos idiomas.
       scorers: (raw.scorers || []).map(s => ({ ...s, team: translateTeamName(s.team || '') })),
       substitutions: (raw.substitutions || []).map(s => ({ ...s, team: translateTeamName(s.team || '') })),
+      cards: (raw.cards || []).map(c => ({ ...c, team: translateTeamName(c.team || '') })),
       statistics: (raw.statistics || []).map(s => ({ ...s, team: translateTeamName(s.team || '') })),
       lineups: (raw.lineups || []).map(l => ({
         ...l,
