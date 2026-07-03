@@ -273,6 +273,25 @@ function _extractGoalPlayer(text) {
   return m ? m[1].trim() : null;
 }
 
+// --- Detecta si un keyEvent de ESPN es un gol válido. Antes solo se
+// aceptaba texto con la palabra "goal", así que penales convertidos que
+// ESPN reporta como "Penalty Scored"/"Penalty - Converted" (sin la
+// palabra "goal") se perdían aunque el marcador ya los contara. Se
+// añaden esas variantes sin tocar la detección existente, y se excluyen
+// explícitamente penales fallados/atajados para no generar goles falsos.
+function _isScoringEvent(typeText) {
+  const t = String(typeText || "");
+  if (/goal/i.test(t)) return true; // "Goal", "Own Goal", "Penalty Goal", "Goal - Penalty", etc.
+  if (
+    /penalty/i.test(t) &&
+    /(scored|converted|goal)/i.test(t) &&
+    !/(miss|save|block|off\s*target|woodwork)/i.test(t)
+  ) {
+    return true; // "Penalty Scored", "Penalty - Converted", sin la palabra "goal"
+  }
+  return false;
+}
+
 // --- Extrae los nombres de jugador que entra/sale de un evento de cambio.
 // Formato típico: "Substitution, Equipo. Nombre Entra replaces Nombre Sale."
 // Si no matchea, devuelve null (nunca la prosa completa).
@@ -324,6 +343,10 @@ async function getMatchById(matchId) {
           description: statusType.description || null,
           detail: statusType.detail || null,
           shortDetail: statusType.shortDetail || null,
+          // Minuto crudo tal como lo entrega ESPN (ej. "38'"), aparte de
+          // detail/shortDetail, para tener un tercer valor de respaldo
+          // antes de caer en description ("1st Half"/"2nd Half").
+          displayClock: header?.competitions?.[0]?.status?.displayClock || null,
           isLive: statusType.state === "in"
         },
         venue: data.gameInfo?.venue?.fullName || null,
@@ -358,7 +381,7 @@ async function getMatchById(matchId) {
         // fallback: si no viene "athletesInvolved" se extrae SOLO el nombre
         // del jugador con una regex sobre el texto (ver _extractGoalPlayer).
         scorers: (data.keyEvents || [])
-          .filter((ev) => /goal/i.test(ev.type?.text || ""))
+          .filter((ev) => _isScoringEvent(ev.type?.text))
           .map((ev) => ({
             player: ev.athletesInvolved?.[0]?.displayName || _extractGoalPlayer(ev.text) || null,
             clock: ev.clock?.displayValue || null,

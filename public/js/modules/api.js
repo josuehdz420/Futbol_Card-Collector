@@ -403,8 +403,11 @@ function _utcToSV(utcStr) {
 //   - Cualquier otro texto de ESPN que no reconozcamos se muestra literal
 //     en vez de forzarlo a un formato de minuto que no le corresponde.
 const _PHASE_LABELS = [
-  [/^1st half$/i,                 null],            // deja pasar el minuto normal
-  [/^2nd half$/i,                 null],
+  // Estos dos solo se usan como último recurso, cuando ni detail ni
+  // shortDetail ni displayClock trajeron un minuto real y lo único
+  // disponible es la fase genérica ("1st Half"/"2nd Half") de description.
+  [/^1st half$/i,                 '1er Tiempo'],
+  [/^2nd half$/i,                 '2do Tiempo'],
   [/^halftime$/i,                 'Descanso'],
   [/^half$/i,                     'Descanso'],
   [/^full ?time$/i,               'Final'],
@@ -448,7 +451,10 @@ function _espnToLegacyGame(espnMatch) {
   const isLive = status.state === 'in' || !!status.isLive;
 
   let timeElapsed = '';
-  if (isLive) timeElapsed = _formatMatchPhase(status.description || status.detail || status.shortDetail) || 'live';
+  // Prioridad: detail > shortDetail > displayClock > description. detail/
+  // shortDetail suelen traer el minuto real ("38'", "45+2'"); description
+  // solo trae la fase genérica ("1st Half"), así que va al final.
+  if (isLive) timeElapsed = _formatMatchPhase(status.detail || status.shortDetail || status.displayClock || status.description) || 'live';
   else if (!isFinished) timeElapsed = 'notstarted';
 
   let group = null, matchday = null;
@@ -516,6 +522,7 @@ function _normalizeEspnEventDirect(event, leagueId) {
       description: status.description || null,
       detail: status.detail,
       shortDetail: status.shortDetail,
+      displayClock: competition?.status?.displayClock || null,
       isLive: status.state === 'in',
       completed: !!status.completed,
     },
@@ -559,7 +566,10 @@ async function _fetchEspnMatchDirect(matchId) {
     date: competition?.date || null,
     status: {
       state: competition?.status?.type?.state,
+      description: competition?.status?.type?.description || null,
       detail: competition?.status?.type?.detail,
+      shortDetail: competition?.status?.type?.shortDetail,
+      displayClock: competition?.status?.displayClock || null,
       isLive: competition?.status?.type?.state === 'in',
       completed: !!competition?.status?.type?.completed,
     },
@@ -593,6 +603,22 @@ function _extractSubPlayers(text) {
   return { playerIn: m[1].trim(), playerOut: m[2].trim() };
 }
 
+// --- Réplica de _isScoringEvent en espnService.js: además de "goal",
+// reconoce penales convertidos que ESPN reporta sin esa palabra
+// ("Penalty Scored", "Penalty - Converted"), excluyendo fallados/atajados.
+function _isScoringEvent(typeText) {
+  const t = String(typeText || '');
+  if (/goal/i.test(t)) return true;
+  if (
+    /penalty/i.test(t) &&
+    /(scored|converted|goal)/i.test(t) &&
+    !/(miss|save|block|off\s*target|woodwork)/i.test(t)
+  ) {
+    return true;
+  }
+  return false;
+}
+
 // Igual que getMatchById en espnService.js pero llamado directo desde el
 // navegador (último recurso si nuestro backend propio no responde). Trae
 // el detalle "enriquecido" completo: goleadores, cambios, estadísticas y
@@ -618,6 +644,7 @@ async function _fetchEspnMatchDetailDirect(matchId) {
       description: statusType.description || null,
       detail: statusType.detail || null,
       shortDetail: statusType.shortDetail || null,
+      displayClock: competition?.status?.displayClock || null,
       isLive: statusType.state === 'in',
     },
     venue: data.gameInfo?.venue?.fullName || null,
@@ -634,7 +661,7 @@ async function _fetchEspnMatchDetailDirect(matchId) {
       team: ev.team?.displayName || null,
     })),
     scorers: (data.keyEvents || [])
-      .filter(ev => /goal/i.test(ev.type?.text || ''))
+      .filter(ev => _isScoringEvent(ev.type?.text))
       .map(ev => ({
         player: ev.athletesInvolved?.[0]?.displayName || _extractGoalPlayer(ev.text) || null,
         clock: ev.clock?.displayValue || null,
@@ -1275,7 +1302,7 @@ const API = {
     const homeName = translateTeamName(raw.home?.name || '');
     const awayName = translateTeamName(raw.away?.name || '');
     const phase = (isLive || isFinished)
-      ? _formatMatchPhase(status.description || status.detail || status.shortDetail)
+      ? _formatMatchPhase(status.detail || status.shortDetail || status.displayClock || status.description)
       : '';
 
     return {

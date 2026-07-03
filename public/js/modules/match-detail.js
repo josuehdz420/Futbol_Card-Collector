@@ -227,17 +227,63 @@ const MatchDetail = {
     return /^(G|GK)$/i.test(pos || '');
   },
 
+  // --- Prioridad táctica de profundidad (defensa -> ataque) según el
+  // código de posición que manda ESPN (p.position, ej. "LB", "CDM", "RW",
+  // "ST"). Se usa SOLO para ordenar a los titulares antes de repartirlos
+  // en líneas; no toca el sistema de render de la cancha. Si la posición
+  // no matchea ninguna entrada conocida, se asume centrocampista (valor
+  // intermedio) para no romper el reparto por formación. ---
+  _POS_DEPTH: [
+    [/^(LWB|RWB|LB|RB|LCB|RCB|CB|SW|D)$/i, 1],
+    [/^(LDM|RDM|CDM|DM)$/i, 2],
+    [/^(LCM|RCM|CM|M)$/i, 3],
+    [/^(LM|RM|WM)$/i, 4],
+    [/^(LAM|RAM|CAM|AM)$/i, 5],
+    [/^(LW|RW|W)$/i, 6],
+    [/^(LF|RF|CF|SS|ST|FW|F)$/i, 7]
+  ],
+
+  _posDepth(pos) {
+    const p = String(pos || '').trim().toUpperCase();
+    for (const [re, depth] of this._POS_DEPTH) {
+      if (re.test(p)) return depth;
+    }
+    return 3;
+  },
+
+  // --- Banda horizontal (izquierda/centro/derecha) a partir del código de
+  // posición: si empieza con "L" va a la izquierda, con "R" a la derecha,
+  // cualquier otra cosa (CB, CM, ST, GK, D, M, F...) queda al centro. ---
+  _posSide(pos) {
+    const p = String(pos || '').trim().toUpperCase();
+    if (/^L/.test(p)) return -1;
+    if (/^R/.test(p)) return 1;
+    return 0;
+  },
+
   // --- A partir de la formación ("4-3-3") y los titulares, arma las líneas
   // tácticas (defensa, medio, ataque) para dibujar la cancha. Si la
   // formación no coincide con el número de titulares (dato incompleto de
-  // ESPN), cae a un reparto en filas parejas para no romper el render. ---
+  // ESPN), cae a un reparto en filas parejas para no romper el render.
+  // Antes de repartir, los titulares se ordenan por profundidad táctica
+  // real (posición ESPN), no por el orden crudo del roster: así el 4-3-3,
+  // 4-4-2, 4-2-3-1, 3-5-2, etc. arman líneas correctas (defensa/medio/
+  // ataque) sin importar el orden en que ESPN entregue el roster. Ya
+  // repartidos, cada línea se reordena de izquierda a derecha según la
+  // banda de cada posición, así los extremos no salen invertidos y el 9
+  // queda al centro en vez de en banda. ---
   _formationLines(lineup) {
     const starters = (lineup && lineup.starters) || [];
     if (!starters.length) return null;
 
     const gkIndex = starters.findIndex(p => this._isGK(p.position));
     const gk = gkIndex >= 0 ? starters[gkIndex] : starters[0];
-    const rest = starters.filter((_, i) => i !== (gkIndex >= 0 ? gkIndex : 0));
+    const restRaw = starters.filter((_, i) => i !== (gkIndex >= 0 ? gkIndex : 0));
+
+    const rest = restRaw
+      .map((p, i) => ({ p, i, depth: this._posDepth(p.position) }))
+      .sort((a, b) => a.depth - b.depth || a.i - b.i)
+      .map(x => x.p);
 
     const parsed = String(lineup.formation || '')
       .split(/[-\s]+/)
@@ -261,6 +307,10 @@ const MatchDetail = {
     } else {
       lines = [];
     }
+
+    lines = lines.map(line =>
+      line.slice().sort((a, b) => this._posSide(a.position) - this._posSide(b.position))
+    );
 
     return { gk, lines };
   },
