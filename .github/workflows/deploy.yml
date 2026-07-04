@@ -42,7 +42,7 @@ jobs:
           PUBLIC_API_URL: ${{ vars.PUBLIC_API_URL }}
         run: npm run build
 
-      # Paso que faltaba: prepara/valida el sitio de Pages (origen,
+      # aso que faltaba: prepara/valida el sitio de Pages (origen,
       # base path, etc.) antes de subir el artifact. Es parte de la
       # plantilla oficial de GitHub y ayuda a evitar fallos genéricos
       # de deploy-pages.
