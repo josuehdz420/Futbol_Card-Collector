@@ -265,12 +265,30 @@ async function getLiveMatches() {
 // --- Extrae SOLO el nombre del jugador desde la prosa editorial de ESPN
 // para un evento de gol, sin exponer el resto del texto. Formato típico:
 // "Goal! Equipo 1, Equipo 2. Nombre Jugador (Equipo) left footed shot ..."
-// Si no matchea el patrón esperado, devuelve null (nunca la prosa completa).
+// Para autogoles ESPN usa un preámbulo distinto ("Own Goal! ...") y a veces
+// no incluye el "(Equipo)" después del nombre, así que se prueban varios
+// patrones en orden. Si ninguno matchea, devuelve null (nunca la prosa
+// completa).
 function _extractGoalPlayer(text) {
   if (!text) return null;
-  const afterScoreline = String(text).replace(/^Goal!\s*[^.]*\.\s*/i, "");
-  const m = afterScoreline.match(/^([^(]+?)\s*\(/);
-  return m ? m[1].trim() : null;
+  const raw = String(text);
+  // Quita el preámbulo del marcador, sea gol normal o autogol.
+  const afterScoreline = raw.replace(/^(?:own\s+)?goal!\s*[^.]*\.\s*/i, "");
+
+  // Caso normal / autogol con equipo entre paréntesis: "Nombre (Equipo) ..."
+  const withParens = afterScoreline.match(/^([^(]+?)\s*\(/);
+  if (withParens) return withParens[1].trim();
+
+  // Autogol narrado sin paréntesis: "Nombre Jugador own goal ..." /
+  // "Nombre Jugador scores an own goal ..."
+  const ownGoalPhrase = afterScoreline.match(/^([^.]+?)\s+(?:scores?\s+an?\s+)?own[\s-]?goal/i);
+  if (ownGoalPhrase) return ownGoalPhrase[1].trim();
+
+  // Autogol narrado como "Own goal by Nombre Jugador."
+  const byPhrase = raw.match(/own[\s-]?goal\s+by\s+([^.,]+)/i);
+  if (byPhrase) return byPhrase[1].trim();
+
+  return null;
 }
 
 // --- Extrae SOLO el nombre de quien dio la asistencia, si ESPN lo incluye

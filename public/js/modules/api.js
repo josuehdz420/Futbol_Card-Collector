@@ -588,11 +588,23 @@ async function _fetchEspnMatchDirect(matchId) {
 // --- Réplica en el navegador de las funciones equivalentes en
 // server/src/services/espnService.js. Extraen SOLO el nombre del jugador
 // desde la prosa editorial de ESPN, nunca exponen el resto del texto.
+// --- Réplica de _extractGoalPlayer en espnService.js: soporta el
+// preámbulo "Own Goal! ..." y autogoles narrados sin "(Equipo)". ---
 function _extractGoalPlayer(text) {
   if (!text) return null;
-  const afterScoreline = String(text).replace(/^Goal!\s*[^.]*\.\s*/i, "");
-  const m = afterScoreline.match(/^([^(]+?)\s*\(/);
-  return m ? m[1].trim() : null;
+  const raw = String(text);
+  const afterScoreline = raw.replace(/^(?:own\s+)?goal!\s*[^.]*\.\s*/i, "");
+
+  const withParens = afterScoreline.match(/^([^(]+?)\s*\(/);
+  if (withParens) return withParens[1].trim();
+
+  const ownGoalPhrase = afterScoreline.match(/^([^.]+?)\s+(?:scores?\s+an?\s+)?own[\s-]?goal/i);
+  if (ownGoalPhrase) return ownGoalPhrase[1].trim();
+
+  const byPhrase = raw.match(/own[\s-]?goal\s+by\s+([^.,]+)/i);
+  if (byPhrase) return byPhrase[1].trim();
+
+  return null;
 }
 
 // --- Réplica de _extractAssistPlayer / _extractCardPlayer en espnService.js ---
