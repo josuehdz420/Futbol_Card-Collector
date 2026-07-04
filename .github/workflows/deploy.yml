@@ -11,7 +11,11 @@ permissions:
 
 concurrency:
   group: "pages"
-  cancel-in-progress: true
+  # false en vez de true: si cae un push mientras el despliegue anterior
+  # sigue en curso, se deja terminar en vez de cancelarlo a la mitad.
+  # Cancelar un despliegue de Pages a medias es una causa conocida de
+  # "Deployment failed, try again later." en el siguiente intento.
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -37,6 +41,13 @@ jobs:
           # fallback ya hardcodeado con la URL real de Render.
           PUBLIC_API_URL: ${{ vars.PUBLIC_API_URL }}
         run: npm run build
+
+      # Paso que faltaba: prepara/valida el sitio de Pages (origen,
+      # base path, etc.) antes de subir el artifact. Es parte de la
+      # plantilla oficial de GitHub y ayuda a evitar fallos genéricos
+      # de deploy-pages.
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
