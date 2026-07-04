@@ -371,7 +371,20 @@ const MatchDetail = {
     const restRaw = starters.filter((_, i) => i !== (gkIndex >= 0 ? gkIndex : 0));
 
     const rest = restRaw
-      .map((p, i) => ({ p, i, depth: this._posDepth(p.position) }))
+      .map((p, i) => ({
+        p,
+        i,
+        // A veces ESPN da un código genérico para todos los mediocampistas
+        // (ej. "M" tanto para el pivote como para el extremo), y ahí la
+        // profundidad por sí sola empata. Como desempate se usa la banda:
+        // a igual categoría, un jugador de banda (L../R..) se asume más
+        // ofensivo que uno central, porque en la práctica el doble pivote
+        // casi siempre es central y los extremos casi siempre juegan por
+        // banda. El +0.5 es menor al salto entre categorías reales (1 en
+        // _POS_DEPTH), así que nunca reordena posiciones ya bien
+        // diferenciadas (ej. un CB nunca se mezcla con un CDM por esto).
+        depth: this._posDepth(p.position) + (this._posSide(p.position) !== 0 ? 0.5 : 0)
+      }))
       .sort((a, b) => a.depth - b.depth || a.i - b.i)
       .map(x => x.p);
 
