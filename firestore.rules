@@ -14,6 +14,17 @@ service cloud.firestore {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
+    // Config de la app editable solo por la cuenta admin (UID fijo, ver
+    // public/js/utils/admin.js). Lectura pública para cualquier usuario
+    // logueado (ej. config/live la necesita todo el mundo para ver la
+    // transmisión). Esta regla es la única fuente de verdad real de
+    // autorización — el chequeo en el frontend es solo para no mostrar la
+    // UI de edición a quien no es admin, no un mecanismo de seguridad.
+    match /config/{docId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == 'EDh7heVm8xd1wUWuIXjwnH6yKe43';
+    }
+
     // Bloquea todo lo demás por defecto.
     match /{document=**} {
       allow read, write: if false;

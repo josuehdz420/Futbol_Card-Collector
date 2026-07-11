@@ -4372,3 +4372,65 @@ button.btn-pred-history-toggle.active {
     border-radius: 10px;
   }
 }
+
+/* FWC EN VIVO — edición de admin (botón "Editar" + formulario del modal).
+   El botón solo existe en el DOM cuando Admin.isAdmin() es true (ver
+   app.js), así que no hace falta ocultarlo por CSS para usuarios comunes. */
+.btn-live-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-bright);
+  border-radius: 20px;
+  color: var(--text-secondary);
+  padding: 0.35rem 0.85rem;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.75rem;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-live-edit:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 12px var(--accent-glow);
+}
+
+.live-admin-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+.live-admin-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.live-admin-field label {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 0.7rem;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.live-admin-field input,
+.live-admin-field textarea {
+  width: 100%;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: 'Barlow', sans-serif;
+  font-size: 0.85rem;
+  padding: 0.55rem 0.75rem;
+  outline: none;
+  transition: border-color 0.2s;
+  resize: vertical;
+}
+.live-admin-field input:focus,
+.live-admin-field textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}

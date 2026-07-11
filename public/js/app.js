@@ -242,6 +242,8 @@ const App = {
       case 'exchange':    await Exchange.render(); break;
       case 'profile':     await Profile.render(); break;
       case 'live': {
+        await this._applyLiveConfig();
+        this._renderLiveAdminButton();
         const liveIframe = document.getElementById('live-iframe');
         if (liveIframe && !liveIframe.getAttribute('src')) {
           const activeChannelBtn = document.querySelector('.live-channel-btn.active') || document.querySelector('.live-channel-btn');
@@ -251,6 +253,152 @@ const App = {
         break;
       }
     }
+  },
+
+  // --------------------------------------------------------------
+  // Sección "En Vivo" editable por el admin (ver public/js/utils/admin.js).
+  // La config vive en Firestore config/live; si nadie ha guardado nada
+  // todavía (getLiveConfig() devuelve null), se dejan los valores que ya
+  // trae el HTML estático de TabLive.astro tal cual, sin tocar nada.
+  // --------------------------------------------------------------
+
+  async _applyLiveConfig() {
+    if (typeof Admin === 'undefined') return;
+
+    // Se pide una sola vez por sesión — no hace falta releer Firestore
+    // cada vez que se vuelve a abrir la pestaña En Vivo.
+    if (!this._liveConfigLoaded) {
+      try {
+        this._liveConfig = await Admin.getLiveConfig();
+      } catch (err) {
+        console.warn('[App] no se pudo cargar config de En Vivo', err);
+        this._liveConfig = null;
+      }
+      this._liveConfigLoaded = true;
+    }
+
+    const cfg = this._liveConfig;
+    if (!cfg) return;
+
+    const btn1 = document.querySelector('.live-channel-btn[data-channel="1"]');
+    const btn2 = document.querySelector('.live-channel-btn[data-channel="2"]');
+
+    if (btn1) {
+      if (cfg.canal1Url)   btn1.dataset.src = cfg.canal1Url;
+      if (cfg.canal1Label) {
+        const label = btn1.querySelector('.live-channel-label');
+        if (label) label.textContent = cfg.canal1Label;
+      }
+    }
+    if (btn2) {
+      if (cfg.canal2Url)   btn2.dataset.src = cfg.canal2Url;
+      if (cfg.canal2Label) {
+        const label = btn2.querySelector('.live-channel-label');
+        if (label) label.textContent = cfg.canal2Label;
+      }
+    }
+
+    // El dataset.src del iframe (usado como fuente inicial antes de que el
+    // usuario toque un botón) debe reflejar el canal que está activo ahora.
+    const liveIframe = document.getElementById('live-iframe');
+    const activeBtn = document.querySelector('.live-channel-btn.active') || btn1;
+    if (liveIframe && activeBtn?.dataset.src) {
+      liveIframe.dataset.src = activeBtn.dataset.src;
+    }
+
+    if (cfg.avisoTexto) {
+      const noticeText = document.getElementById('live-notice-text');
+      if (noticeText) noticeText.textContent = cfg.avisoTexto;
+    }
+  },
+
+  _renderLiveAdminButton() {
+    if (typeof Admin === 'undefined' || !Admin.isAdmin()) return;
+    if (document.getElementById('btn-live-edit')) return; // ya existe, no duplicar
+
+    const header = document.querySelector('#tab-live .section-header');
+    if (!header) return;
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.id = 'btn-live-edit';
+    btn.className = 'btn-live-edit';
+    btn.title = 'Editar transmisión En Vivo';
+    btn.innerHTML = `
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
+      Editar
+    `;
+    btn.addEventListener('click', () => this._openLiveEditModal());
+    header.appendChild(btn);
+  },
+
+  _openLiveEditModal() {
+    const btn1  = document.querySelector('.live-channel-btn[data-channel="1"]');
+    const btn2  = document.querySelector('.live-channel-btn[data-channel="2"]');
+    const label1 = btn1?.querySelector('.live-channel-label');
+    const label2 = btn2?.querySelector('.live-channel-label');
+    const notice = document.getElementById('live-notice-text');
+
+    const current = {
+      canal1Url:   btn1?.dataset.src || '',
+      canal1Label: label1?.textContent.trim() || '',
+      canal2Url:   btn2?.dataset.src || '',
+      canal2Label: label2?.textContent.trim() || '',
+      avisoTexto:  notice?.textContent.trim() || '',
+    };
+
+    Modal.open(`
+      <h3 style="font-family:'Bebas Neue',cursive;letter-spacing:1px;margin-bottom:1rem">Editar En Vivo</h3>
+      <form id="live-edit-form" class="live-admin-form">
+        <div class="live-admin-field">
+          <label for="live-edit-canal1-url">Canal 1 — URL</label>
+          <input type="text" id="live-edit-canal1-url" value="${current.canal1Url.replace(/"/g, '&quot;')}">
+        </div>
+        <div class="live-admin-field">
+          <label for="live-edit-canal1-label">Canal 1 — Texto del botón</label>
+          <input type="text" id="live-edit-canal1-label" value="${current.canal1Label.replace(/"/g, '&quot;')}">
+        </div>
+        <div class="live-admin-field">
+          <label for="live-edit-canal2-url">Canal 2 — URL</label>
+          <input type="text" id="live-edit-canal2-url" value="${current.canal2Url.replace(/"/g, '&quot;')}">
+        </div>
+        <div class="live-admin-field">
+          <label for="live-edit-canal2-label">Canal 2 — Texto del botón</label>
+          <input type="text" id="live-edit-canal2-label" value="${current.canal2Label.replace(/"/g, '&quot;')}">
+        </div>
+        <div class="live-admin-field">
+          <label for="live-edit-aviso">Texto del aviso</label>
+          <textarea id="live-edit-aviso" rows="3">${current.avisoTexto}</textarea>
+        </div>
+        <button type="submit" class="btn-primary" style="width:100%;margin-top:0.5rem">Guardar</button>
+      </form>
+    `);
+
+    document.getElementById('live-edit-form')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const submitBtn = e.target.querySelector('button[type="submit"]');
+      const newCfg = {
+        canal1Url:   document.getElementById('live-edit-canal1-url').value.trim(),
+        canal1Label: document.getElementById('live-edit-canal1-label').value.trim(),
+        canal2Url:   document.getElementById('live-edit-canal2-url').value.trim(),
+        canal2Label: document.getElementById('live-edit-canal2-label').value.trim(),
+        avisoTexto:  document.getElementById('live-edit-aviso').value.trim(),
+      };
+
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Guardando...'; }
+      try {
+        await Admin.saveLiveConfig(newCfg);
+        this._liveConfig = { ...(this._liveConfig || {}), ...newCfg };
+        this._liveConfigLoaded = true;
+        await this._applyLiveConfig();
+        Modal.close();
+        Toast.success('✅ Transmisión actualizada');
+      } catch (err) {
+        console.error('[App] no se pudo guardar config de En Vivo', err);
+        Toast.error('No se pudo guardar. Intenta de nuevo.');
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Guardar'; }
+      }
+    });
   },
 
   _bindNavEvents() {
