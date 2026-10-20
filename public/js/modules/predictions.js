@@ -48,7 +48,7 @@ const Predictions = {
     list.innerHTML = matches.map(m => {
       const existing   = preds.find(p => p.matchId === m.id);
       const isLocked   = !!existing;
-      const isFriendly = m.type === 'friendly';
+      const isMain     = typeof API !== 'undefined' && API.isMainLeague ? API.isMainLeague(m.league) : true;
       const state      = API.getMatchState(m);       
       const isClosed   = isLocked || state === 'closed' || state === 'live' || state === 'finished';
 
@@ -79,10 +79,9 @@ const Predictions = {
         <div class="prediction-card" data-match="${m.id}">
           <div class="pred-meta">
             <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
-              <span class="pred-type-badge ${isFriendly ? 'pred-type-friendly' : 'pred-type-worldcup'}">
-                ${isFriendly ? '🤝 Amistoso' : '🏆 Mundial 2026'}
+              <span class="pred-type-badge ${isMain ? 'pred-type-worldcup' : 'pred-type-friendly'}">
+                ${isMain ? '🏆' : '🥈'} ${m.competition || 'Partido'}
               </span>
-              <span class="pred-competition">${m.competition || 'Mundial 2026'}</span>
               ${stateHtml}
             </div>
             <span class="pred-date">${this._formatDate(m.date)}${m.time ? ' · ' + m.time : ''}</span>
@@ -93,7 +92,7 @@ const Predictions = {
               ${homeCrest
                 ? `<img src="${homeCrest}" alt="${m.home}" class="pred-crest" onerror="this.style.display='none';this.nextElementSibling.style.display='block'">`
                 : ''}
-              <span class="pred-crest-fallback" style="${homeCrest ? 'display:none' : ''}">${m.homeFlag || '🏠'}</span>
+              <span class="pred-crest-fallback" style="${homeCrest ? 'display:none' : ''}">🛡️</span>
               <span class="pred-team-name">${m.home}</span>
             </div>
 
@@ -115,7 +114,7 @@ const Predictions = {
               ${awayCrest
                 ? `<img src="${awayCrest}" alt="${m.away}" class="pred-crest" onerror="this.style.display='none';this.nextElementSibling.style.display='block'">`
                 : ''}
-              <span class="pred-crest-fallback" style="${awayCrest ? 'display:none' : ''}">${m.awayFlag || '✈️'}</span>
+              <span class="pred-crest-fallback" style="${awayCrest ? 'display:none' : ''}">🛡️</span>
               <span class="pred-team-name">${m.away}</span>
             </div>
           </div>
@@ -181,12 +180,12 @@ const Predictions = {
           box-shadow:0 4px 24px rgba(200,160,0,0.4);letter-spacing:0.5px;
           display:flex;align-items:center;justify-content:center;gap:0.6rem;
         "><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 010-5H6"/><path d="M18 9h1.5a2.5 2.5 0 000-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0012 0V2z"/></svg>
-          Predecir Mundial 2026
+          Predecir campeón de Liga
           <span style="font-size:0.72rem;font-weight:500;opacity:0.75">· Hasta 50+ tiradas</span>
         </button>`;
       
       list.parentElement.insertBefore(wcBtn, list);
-      document.getElementById('btn-predict-wc').addEventListener('click', () => WorldCupPredictor.open());
+      document.getElementById('btn-predict-wc').addEventListener('click', () => LeaguePredictor.open());
     }
 
     
@@ -219,12 +218,12 @@ const Predictions = {
     return `
       <div class="prediction-btns">
         <button class="pred-btn" data-pick="home">
-          ${homeCrest ? `<img src="${homeCrest}" style="width:20px;height:20px;object-fit:contain;vertical-align:middle;margin-right:4px" onerror="this.remove()">` : (m.homeFlag || '') + ' '}
+          ${homeCrest ? `<img src="${homeCrest}" style="width:20px;height:20px;object-fit:contain;vertical-align:middle;margin-right:4px" onerror="this.remove()">` : '🛡️ '}
           ${m.home}
         </button>
         <button class="pred-btn" data-pick="draw">🤝 Empate</button>
         <button class="pred-btn" data-pick="away">
-          ${awayCrest ? `<img src="${awayCrest}" style="width:20px;height:20px;object-fit:contain;vertical-align:middle;margin-right:4px" onerror="this.remove()">` : (m.awayFlag || '') + ' '}
+          ${awayCrest ? `<img src="${awayCrest}" style="width:20px;height:20px;object-fit:contain;vertical-align:middle;margin-right:4px" onerror="this.remove()">` : '🛡️ '}
           ${m.away}
         </button>
       </div>
@@ -305,7 +304,7 @@ const Predictions = {
       <div class="modal-player-detail">
         <h2 class="modal-player-name" style="margin-bottom:0.25rem">👕 Alineación</h2>
         <p style="font-size:0.7rem;color:var(--text-muted);margin-bottom:0.75rem">
-          ${m.homeFlag||''} ${m.home} vs ${m.away} ${m.awayFlag||''}
+          ${m.home} vs ${m.away}
         </p>
         ${lineupHtml}
       </div>
@@ -389,15 +388,15 @@ const Predictions = {
     }
 
     
-    let matchHome = '', matchAway = '', matchHomeFlag = '', matchAwayFlag = '';
+    let matchHome = '', matchAway = '', matchHomeCrest = '', matchAwayCrest = '';
     try {
       const allMatches = await API.getPredictableMatches();
       const m = (allMatches || []).find(x => String(x.id) === String(matchId));
       if (m) {
-        matchHome     = m.home     || '';
-        matchAway     = m.away     || '';
-        matchHomeFlag = m.homeFlag || '';
-        matchAwayFlag = m.awayFlag || '';
+        matchHome      = m.home      || '';
+        matchAway      = m.away      || '';
+        matchHomeCrest = m.homeCrest || '';
+        matchAwayCrest = m.awayCrest || '';
       }
     } catch(_) {}
 
@@ -405,8 +404,8 @@ const Predictions = {
       matchId,
       matchHome,
       matchAway,
-      matchHomeFlag,
-      matchAwayFlag,
+      matchHomeCrest,
+      matchAwayCrest,
       pick,
       exact:     exact || null,
       result:    'pending',
@@ -452,8 +451,8 @@ const Predictions = {
       
       if (!pred.matchHome && match.home) pred.matchHome = match.home;
       if (!pred.matchAway && match.away) pred.matchAway = match.away;
-      if (!pred.matchHomeFlag && match.homeFlag) pred.matchHomeFlag = match.homeFlag;
-      if (!pred.matchAwayFlag && match.awayFlag) pred.matchAwayFlag = match.awayFlag;
+      if (!pred.matchHomeCrest && match.homeCrest) pred.matchHomeCrest = match.homeCrest;
+      if (!pred.matchAwayCrest && match.awayCrest) pred.matchAwayCrest = match.awayCrest;
 
       let predTiradas = 0;
       if (pred.pick === finalResult) {
@@ -478,8 +477,8 @@ const Predictions = {
       newlyResolved.push({
         matchHome:     pred.matchHome || match.home,
         matchAway:     pred.matchAway || match.away,
-        matchHomeFlag: pred.matchHomeFlag || match.homeFlag,
-        matchAwayFlag: pred.matchAwayFlag || match.awayFlag,
+        matchHomeCrest: pred.matchHomeCrest || match.homeCrest,
+        matchAwayCrest: pred.matchAwayCrest || match.awayCrest,
         finalScore:    exactScore,
         pick:          pred.pick,
         exact:         pred.exact || null,
@@ -543,8 +542,8 @@ const Predictions = {
 
     const home = first.matchHome || 'Local';
     const away = first.matchAway || 'Visitante';
-    const homeFlag = first.matchHomeFlag || '🏠';
-    const awayFlag = first.matchAwayFlag || '✈️';
+    const homeCrest = first.matchHomeCrest || '';
+    const awayCrest = first.matchAwayCrest || '';
 
     const headerIcon  = first.won ? '🏆' : '❌';
     const headerText  = first.won ? '¡Acertaste!' : 'Fallaste esta vez';
@@ -565,7 +564,7 @@ const Predictions = {
           ${headerText}
         </h3>
         <p style="font-size:0.85rem;color:var(--text-secondary);margin:0 0 0.25rem">
-          ${homeFlag} ${home} <strong style="color:var(--text-primary)">${first.finalScore || ''}</strong> ${away} ${awayFlag}
+          ${homeCrest ? `<img src="${homeCrest}" style="width:16px;height:16px;object-fit:contain;vertical-align:-3px" onerror="this.remove()">` : ''} ${home} <strong style="color:var(--text-primary)">${first.finalScore || ''}</strong> ${away} ${awayCrest ? `<img src="${awayCrest}" style="width:16px;height:16px;object-fit:contain;vertical-align:-3px" onerror="this.remove()">` : ''}
         </p>
         <p style="font-size:0.75rem;color:var(--text-muted);margin:0 0 0.75rem">
           Tu predicción: <strong>${pickLabel}</strong>${first.exact ? ` · Marcador: <strong>${first.exact}</strong>` : ''}

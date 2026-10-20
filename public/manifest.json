@@ -1,7 +1,7 @@
 {
-  "name": "World Cup Collector — UES",
+  "name": "Club Collector — UES",
   "short_name": "WCC",
-  "description": "Colecciona figuritas del Mundial 2026 — UES",
+  "description": "Colecciona figuritas de La Liga, Premier League y Champions League — UES",
   "start_url": "/Futbol_Card-Collector/app",
   "scope": "/Futbol_Card-Collector/",
   "display": "standalone",

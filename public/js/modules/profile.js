@@ -159,7 +159,7 @@ const Profile = {
       favTeams.innerHTML = teams.length
         ? teams.map(f => `
             <span class="fav-tag">
-              ${f.flag || ''} ${f.name}
+              ${f.name}
               <button data-id="${f.id}" data-tipo="team" title="Eliminar">✕</button>
             </span>`).join('')
         : '<span class="text-muted" style="font-size:0.8rem">Sin equipos favoritos</span>';
@@ -169,7 +169,7 @@ const Profile = {
       favPlayers.innerHTML = players.length
         ? players.map(f => `
             <span class="fav-tag">
-              ${f.flag || ''} ${f.name}
+              ${f.name}
               <button data-id="${f.id}" data-tipo="player" title="Eliminar">✕</button>
             </span>`).join('')
         : '<span class="text-muted" style="font-size:0.8rem">Sin jugadores favoritos</span>';

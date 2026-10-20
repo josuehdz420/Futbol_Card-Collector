@@ -6,11 +6,15 @@
 const PUBLIC_API_BASE = import.meta.env.PUBLIC_API_URL || 'https://futbol-card-collector-api.onrender.com';
 ---
 <script is:inline define:vars={{ PUBLIC_API_BASE }}>
-  // En localhost se usa automáticamente localhost:3001. En cualquier otro
-  // host (GitHub Pages, etc.) se usa la URL inyectada en build time.
-  window.__API_BASE__ = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
-    ? 'http://localhost:3001'
-    : PUBLIC_API_BASE;
+  // Desarrollo (localhost, 127.0.0.1 o IP de red local, p. ej. probando desde
+  // el móvil en http://192.168.x.x:4321) -> backend local en el puerto 3001 del
+  // MISMO host. Cualquier otro host (GitHub Pages, etc.) -> URL inyectada en build.
+  (function () {
+    var h = location.hostname;
+    var isLocal = h === 'localhost' || h === '127.0.0.1' || h === '[::1]' || /\.local$/.test(h) ||
+      /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h);
+    window.__API_BASE__ = isLocal ? 'http://' + h + ':3001' : PUBLIC_API_BASE;
+  })();
 </script>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
@@ -20,8 +24,8 @@ const PUBLIC_API_BASE = import.meta.env.PUBLIC_API_URL || 'https://futbol-card-c
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
 <meta name="apple-mobile-web-app-title" content="WCC UES"/>
-<meta name="description" content="Colecciona figuritas del Mundial 2026, predice partidos y gana recompensas"/>
-<title>Fifa World Cup Coleccion — UES</title>
+<meta name="description" content="Sigue La Liga, Premier League y Champions League: colecciona figuritas, predice partidos y gana recompensas"/>
+<title>Club Collector — UES</title>
 
 <link rel="manifest" href="/Futbol_Card-Collector/manifest.json"/>
 <link rel="icon" type="image/png" sizes="192x192" href="/Futbol_Card-Collector/icons/icon-192.png"/>
@@ -29,7 +33,7 @@ const PUBLIC_API_BASE = import.meta.env.PUBLIC_API_URL || 'https://futbol-card-c
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow:wght@300;400;600;700&family=Barlow+Condensed:wght@400;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/Futbol_Card-Collector/css/worldcup2026-theme.css"/>
+<link rel="stylesheet" href="/Futbol_Card-Collector/css/club-theme.css"/>
 <link rel="stylesheet" href="/Futbol_Card-Collector/css/app.css"/>
 <link rel="stylesheet" href="/Futbol_Card-Collector/css/match-detail.css"/>
 

@@ -1,7 +1,6 @@
 const Dashboard = {
 
   async render() {
-    
     await this.renderUpcoming();
     await Promise.all([
       this.renderLive(),
@@ -9,17 +8,29 @@ const Dashboard = {
       this.renderFavorites()
     ]);
 
-    
     if (!this._upcomingRefreshTimer) {
       this._upcomingRefreshTimer = API.registerTimer(() => this.renderUpcoming(), 5 * 60 * 1000);
     }
-    
     if (!this._standingsRefreshTimer) {
       this._standingsRefreshTimer = API.registerTimer(() => this.renderStandings(), 6 * 60 * 60 * 1000);
     }
   },
 
-  
+  // Badge de competición: distinto color para las 3 ligas principales vs
+  // las copas secundarias, usando el nombre corto de cada una.
+  _competitionBadge(m) {
+    const isMain = typeof API !== 'undefined' && API.isMainLeague ? API.isMainLeague(m.league) : true;
+    const label = m.competition || 'Partido';
+    const style = isMain
+      ? 'background:rgba(255,215,0,0.15);color:var(--gold);border:1px solid rgba(255,215,0,0.35)'
+      : 'background:rgba(74,168,255,0.15);color:#4aa8ff;border:1px solid rgba(74,168,255,0.3)';
+    return `<span style="font-size:0.5rem;padding:1px 5px;border-radius:10px;font-weight:700;letter-spacing:0.5px;${style}">${label}</span>`;
+  },
+
+  _crestImg(url, alt) {
+    return `<img src="${url}" alt="${alt||''}" referrerpolicy="no-referrer" style="width:16px;height:16px;object-fit:contain;vertical-align:-3px;margin-right:3px" onerror="this.style.display='none'">`;
+  },
+
   async renderLive() {
     const el = document.getElementById('live-matches');
     if (!el) return;
@@ -29,35 +40,26 @@ const Dashboard = {
       el.dataset.initialized = '1';
     }
 
-    
     const [liveFromApi, upcomingAll] = await Promise.all([
       API.getLiveMatches(),
       API.getUpcomingMatches()
     ]);
 
-    
     const liveSet = new Set((liveFromApi||[]).map(m => m.id));
     const liveOnly = [...(liveFromApi||[]).filter(m => m.status === 'live')];
 
-    
-    
-    
     for (const m of (upcomingAll||[])) {
       if (liveSet.has(m.id)) continue;
-      
-      
-      
       const isLiveByStatus = m.status === 'live';
       const isLiveByTime   = m.status === 'scheduled' && typeof API.getMatchState === 'function'
         && API.getMatchState(m) === 'live';
 
       if (isLiveByStatus || isLiveByTime) {
-        
         if (m.date && m.time) {
           const start   = new Date(`${m.date}T${m.time}:00${typeof API !== 'undefined' && API._venueOffset ? API._venueOffset(m.venue) : '-06:00'}`);
           const diffMin = (Date.now() - start.getTime()) / 60000;
           const maxMin  = typeof API !== 'undefined' ? API._MATCH_MAX_DURATION_MIN : 200;
-          if (diffMin > maxMin) continue; 
+          if (diffMin > maxMin) continue;
         }
         liveOnly.push(isLiveByTime ? { ...m, status: 'live' } : m);
       }
@@ -69,28 +71,21 @@ const Dashboard = {
     }
 
     el.innerHTML = liveOnly.map(m => {
-      const isFriendly = m.type === 'friendly' || m.type !== 'worldcup';
-      const badgeStyle = isFriendly
-        ? 'background:rgba(74,168,255,0.2);color:#4aa8ff;border:1px solid rgba(74,168,255,0.4)'
-        : 'background:rgba(255,215,0,0.15);color:var(--gold);border:1px solid rgba(255,215,0,0.35)';
       const scoreH = m.scoreHome ?? 0;
       const scoreA = m.scoreAway ?? 0;
       return `
       <div class="match-item match-live-item has-bar match-item-clickable" data-match-id="${m.id}" style="border-left-color:#ff4466;display:block;cursor:pointer">
         <div style="display:flex;gap:4px;margin-bottom:4px;align-items:center">
-          <span style="font-size:0.5rem;padding:1px 5px;border-radius:10px;font-weight:700;letter-spacing:1px;${badgeStyle}">
-            ${isFriendly ? 'AMISTOSO' : '🏆 MUNDIAL'}
-          </span>
+          ${this._competitionBadge(m)}
           <span class="match-live-badge" style="font-size:0.55rem;margin-left:auto">
             🔴 ${m.minute || 'EN VIVO'}
           </span>
         </div>
         <div class="match-teams-row">
-          <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.homeFlag||''} ${m.home}</span>
+          <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${this._crestImg(m.homeCrest, m.home)}${m.home}</span>
           <span class="match-score" style="color:#ff4466;font-weight:800;flex-shrink:0">${scoreH} — ${scoreA}</span>
-          <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right">${m.away} ${m.awayFlag||''}</span>
+          <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right">${m.away}${this._crestImg(m.awayCrest, m.away)}</span>
         </div>
-        ${m.competition ? `<div style="font-size:0.62rem;color:var(--text-muted);margin-top:2px;text-align:center">${m.competition}</div>` : ''}
         ${m.venue ? `<div style="font-size:0.58rem;color:var(--text-muted);text-align:center">📍 ${m.venue}</div>` : ''}
         <div style="font-size:0.58rem;color:var(--accent,#00d4ff);text-align:center;margin-top:3px;opacity:.85">Ver alineaciones y estadísticas ›</div>
       </div>`;
@@ -98,14 +93,8 @@ const Dashboard = {
 
     this._bindMatchClicks(el, liveOnly);
 
-    
-    
     if (!this._liveRefreshTimer) {
       this._liveRefreshTimer = API.registerTimer(async () => {
-        // Con stale-while-revalidate ya no hace falta borrar el caché a
-        // mano: forzamos una revalidación en background (los datos que se
-        // ven ahora mismo no desaparecen mientras llega lo nuevo) y
-        // dejamos que 'wcc:cache-update' dispare el re-render solo.
         if (typeof Cache !== 'undefined') {
           Cache.swr('live',     () => API._fetchLiveFromNetwork(),     { ttl: API._TTL.live,     forceNetwork: true });
           Cache.swr('upcoming', () => API._fetchUpcomingFromNetwork(), { ttl: API._TTL.upcoming, forceNetwork: true });
@@ -113,7 +102,6 @@ const Dashboard = {
           this.renderLive();
           this.renderUpcoming();
         }
-
         try {
           const allMatches = await API.getUpcomingMatches();
           if (typeof Predictions !== 'undefined') {
@@ -123,7 +111,7 @@ const Dashboard = {
       }, 2 * 60 * 1000);
     }
   },
-  
+
   async renderUpcoming() {
     const el = document.getElementById('upcoming-matches');
     if (!el) return;
@@ -133,7 +121,6 @@ const Dashboard = {
       API.getLiveMatches()
     ]);
 
-    
     const liveById   = new Map((liveMatches||[]).map(m => [m.id, m]));
     const liveByTeam = new Map();
     (liveMatches||[]).forEach(m => {
@@ -148,8 +135,6 @@ const Dashboard = {
       if (liveMatch) {
         return { ...m, status:'live', scoreHome:liveMatch.scoreHome, scoreAway:liveMatch.scoreAway, minute:liveMatch.minute };
       }
-      
-      
       if (m.status === 'live' && m.date && m.time) {
         const _off  = typeof API !== 'undefined' && API._venueOffset ? API._venueOffset(m.venue) : '-06:00';
         const start   = new Date(`${m.date}T${m.time}:00${_off}`);
@@ -157,9 +142,6 @@ const Dashboard = {
         const maxMin  = typeof API !== 'undefined' ? API._MATCH_MAX_DURATION_MIN : 200;
         if (diffMin > maxMin) return { ...m, status: 'finished' };
       }
-      
-      
-      
       if (m.status === 'scheduled' && typeof API.getMatchState === 'function') {
         const state = API.getMatchState(m);
         if (state === 'live')     return { ...m, status: 'live' };
@@ -173,16 +155,13 @@ const Dashboard = {
       return;
     }
 
-    
     const now      = new Date();
     const todayStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
     const yestDate = new Date(now); yestDate.setDate(yestDate.getDate()-1);
     const yestStr  = `${yestDate.getFullYear()}-${String(yestDate.getMonth()+1).padStart(2,'0')}-${String(yestDate.getDate()).padStart(2,'0')}`;
-    
-    
+
     const isTodayUTC = (m) => {
       if (m.date === todayStr) return true;
-      
       if (m.time && (m.date === todayStr || m.date > todayStr)) {
         const _off = typeof API !== 'undefined' && API._venueOffset ? API._venueOffset(m.venue) : '-06:00';
         const matchUTC = new Date(`${m.date}T${m.time}:00${_off}`);
@@ -192,17 +171,12 @@ const Dashboard = {
       }
       return false;
     };
+
     const renderMatch = m => {
       const isToday    = isTodayUTC(m);
       const isYesterday= m.date === yestStr;
       const isLive     = m.status === 'live';
       const isFinished = m.status === 'finished';
-      const isFriendly = m.type === 'friendly';
-
-      const badgeLabel = isFriendly ? 'AMISTOSO' : '🏆 MUNDIAL';
-      const badgeStyle = isFriendly
-        ? 'background:rgba(74,168,255,0.15);color:var(--rare);border:1px solid rgba(74,168,255,0.3)'
-        : 'background:rgba(255,215,0,0.12);color:var(--gold);border:1px solid rgba(255,215,0,0.3)';
 
       const barColor = isLive ? '#ff4466' : isFinished ? '#555' : isToday ? '#4aa8ff' : 'transparent';
 
@@ -215,12 +189,11 @@ const Dashboard = {
         statusBadge = `<span style="font-size:0.5rem;padding:1px 4px;border-radius:6px;background:rgba(74,168,255,0.2);color:#4aa8ff;font-weight:700;margin-left:2px">HOY · ${m.time||''}</span>`;
       }
 
-      
       let scoreHtml = '';
       if (isFinished && m.scoreHome != null && m.scoreAway != null) {
         scoreHtml = `<span style="font-size:0.88rem;font-weight:800;color:#ddd;letter-spacing:1px;padding:0 4px;min-width:54px;text-align:center">${m.scoreHome} — ${m.scoreAway}</span>`;
       } else if (isFinished) {
-        scoreHtml = `<span style="font-size:0.72rem;font-weight:500;color:#666;padding:0 4px;min-width:54px;text-align:center" title="Resultado no disponible en datos locales. Conecta tu API key para ver el marcador.">? — ?</span>`;
+        scoreHtml = `<span style="font-size:0.72rem;font-weight:500;color:#666;padding:0 4px;min-width:54px;text-align:center">? — ?</span>`;
       } else if (isLive && m.scoreHome != null && m.scoreAway != null) {
         const sh = m.scoreHome ?? 0, sa = m.scoreAway ?? 0;
         scoreHtml = `<span style="font-size:0.88rem;font-weight:800;color:#ff4466;letter-spacing:1px;padding:0 4px;min-width:54px;text-align:center">${sh} — ${sa}</span>`;
@@ -230,37 +203,32 @@ const Dashboard = {
       }
 
       const hasBar = isLive || isFinished || isToday;
-      const clickable = isLive || isFinished; // solo partidos jugados o en juego, como pidió el usuario
+      const clickable = isLive || isFinished;
       return `
       <div class="match-item ${hasBar ? 'has-bar' : ''} ${clickable ? 'match-item-clickable' : ''}" ${clickable ? `data-match-id="${m.id}" style="cursor:pointer;${hasBar ? `border-left-color:${barColor}` : ''}"` : (hasBar ? `style="border-left-color:${barColor}"` : '')}>
         <div style="flex:1;min-width:0">
           <div style="display:flex;gap:4px;margin-bottom:3px;align-items:center;flex-wrap:wrap">
-            <span style="font-size:0.55rem;padding:1px 5px;border-radius:10px;font-family:'Barlow Condensed',sans-serif;font-weight:700;letter-spacing:1px;${badgeStyle}">${badgeLabel}</span>
+            ${this._competitionBadge(m)}
             ${statusBadge}
           </div>
           <div class="match-teams-row" style="font-size:0.82rem;font-weight:600">
-            <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${isFinished ? 'color:var(--text-secondary)' : ''}">${m.homeFlag||''} ${m.home}</span>
+            <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${isFinished ? 'color:var(--text-secondary)' : ''}">${this._crestImg(m.homeCrest, m.home)}${m.home}</span>
             <span style="flex-shrink:0">${scoreHtml}</span>
-            <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right;${isFinished ? 'color:var(--text-secondary)' : ''}">${m.away} ${m.awayFlag||''}</span>
+            <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right;${isFinished ? 'color:var(--text-secondary)' : ''}">${m.away}${this._crestImg(m.awayCrest, m.away)}</span>
           </div>
           ${m.venue ? `<div style="font-size:0.62rem;color:var(--text-muted);margin-top:1px">📍 ${m.venue}</div>` : ''}
         </div>
       </div>`;
     };
 
-    
-    
     const todayFinished  = all.filter(m => isTodayUTC(m) && m.status === 'finished');
     const todayLive      = all.filter(m => isTodayUTC(m) && m.status === 'live');
     const todayScheduled = all.filter(m => isTodayUTC(m) && m.status === 'scheduled');
-    
     const yesterdayDone  = all.filter(m => m.date === yestStr && m.status === 'finished');
-    
     const futureMatches  = all.filter(m => !isTodayUTC(m) && m.date >= todayStr && m.status !== 'finished' && m.date !== yestStr);
 
     let html = '';
 
-    
     if (yesterdayDone.length > 0) {
       const months = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
       const [,ym,yd] = yestStr.split('-');
@@ -271,7 +239,6 @@ const Dashboard = {
       html += yesterdayDone.map(renderMatch).join('');
     }
 
-    
     const todayAll = [...todayLive, ...todayScheduled, ...todayFinished];
     if (todayAll.length > 0) {
       const months = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
@@ -285,9 +252,7 @@ const Dashboard = {
       html += '<p style="font-size:0.72rem;color:var(--text-muted);padding:4px 0">No hay partidos hoy</p>';
     }
 
-    
     if (futureMatches.length > 0) {
-      
       const byDate = {};
       futureMatches.forEach(m => { (byDate[m.date] = byDate[m.date]||[]).push(m); });
 
@@ -304,17 +269,14 @@ const Dashboard = {
     this._bindMatchClicks(el, all);
   },
 
-  // Delegación de click compartida por renderLive() y renderUpcoming(): abre
-  // la ficha del partido (MatchDetail, ver match-detail.js) con alineaciones
-  // y estadísticas rápidas. Solo aplica a partidos en vivo o finalizados —
-  // los que aún no arrancan no tienen nada que mostrar todavía.
   _bindMatchClicks(container, matches) {
     if (!container || typeof MatchDetail === 'undefined') return;
     const byId = new Map((matches || []).map(m => [String(m.id), m]));
     container.querySelectorAll('[data-match-id]').forEach(card => {
       card.addEventListener('click', () => {
         const id = card.dataset.matchId;
-        MatchDetail.open(id, byId.get(id) || null);
+        const m = byId.get(id) || null;
+        MatchDetail.open(id, m, m?.league || null);
       });
     });
   },
@@ -323,29 +285,22 @@ const Dashboard = {
     const d = new Date();
     d.setDate(d.getDate() + 1);
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-  },  
+  },
+
   async renderStandings() {
     const el = document.getElementById('standings-preview');
     if (!el) return;
-    const table = await API.getStandings();
 
-    
-    const globalTop = table
-      .slice()
-      .sort((a, b) =>
-        (b.pts - a.pts) ||
-        ((b.w || 0) - (a.w || 0)) ||
-        ((b.gf || 0) - (a.gf || 0)) ||
-        ((b.gf - b.gc) - (a.gf - a.gc))
-      )
-      .slice(0, 5);
+    const leagues = (typeof API !== 'undefined' && API.getMainLeagues) ? API.getMainLeagues() : [{id:'esp.1',name:'La Liga'}];
+    const activeLeague = this._standingsLeague || leagues[0].id;
+    const table = await API.getStandings(activeLeague);
 
     const tabs = ['pts', 'wins', 'gf'];
     const tabLabels = { pts: 'Pts', wins: 'Victorias', gf: 'Goles' };
     const activeTab = this._standingsTab || 'pts';
 
-    const sortedForTab = (tabKey) => {
-      return table.slice().sort((a, b) => {
+    const sortedForTab = (rows, tabKey) => {
+      return rows.slice().sort((a, b) => {
         if (tabKey === 'pts')  return (b.pts||0) - (a.pts||0) || (b.w||0) - (a.w||0) || (b.gf||0) - (a.gf||0);
         if (tabKey === 'wins') return (b.w||0) - (a.w||0) || (b.pts||0) - (a.pts||0) || (b.gf||0) - (a.gf||0);
         if (tabKey === 'gf')   return (b.gf||0) - (a.gf||0) || (b.pts||0) - (a.pts||0) || (b.w||0) - (a.w||0);
@@ -359,7 +314,7 @@ const Dashboard = {
       return `
         <tr>
           <td class="pos" style="font-size:0.9rem">${medal}</td>
-          <td>${r.flag || ''} ${r.team}</td>
+          <td>${this._crestImg(r.crest, r.team)}${r.team}</td>
           <td style="color:var(--text-secondary)">${r.pj||0}</td>
           <td style="color:var(--gold);font-weight:700">${val}</td>
         </tr>
@@ -368,6 +323,13 @@ const Dashboard = {
 
     el.innerHTML = `
       <div style="overflow-x:hidden;width:100%">
+        <div class="standings-league-tabs" style="display:flex;gap:4px;margin-bottom:6px">
+          ${leagues.map(l => `
+            <button class="standings-league-btn${l.id === activeLeague ? ' active' : ''}" data-league="${l.id}"
+              style="flex:1;padding:3px 4px;font-size:0.62rem;border:1px solid var(--border);border-radius:6px;background:${l.id === activeLeague ? 'var(--gold)' : 'transparent'};color:${l.id === activeLeague ? '#000' : 'var(--text-muted)'};cursor:pointer;font-weight:${l.id === activeLeague ? '700' : '400'}">
+              ${l.short || l.name}
+            </button>`).join('')}
+        </div>
         <div class="standings-tabs" style="display:flex;gap:4px;margin-bottom:6px">
           ${tabs.map(t => `
             <button class="standings-tab-btn${t === activeTab ? ' active' : ''}" data-stab="${t}"
@@ -385,16 +347,22 @@ const Dashboard = {
             </tr>
           </thead>
           <tbody id="standings-rows">
-            ${renderRows(sortedForTab(activeTab), activeTab)}
+            ${renderRows(sortedForTab(table, activeTab), activeTab)}
           </tbody>
         </table>
         <p style="font-size:0.6rem;color:var(--text-muted);margin-top:4px;text-align:right">
-          Top 5 equipos · Mundial 2026
+          Top 5 · ${leagues.find(l=>l.id===activeLeague)?.name || ''}
         </p>
       </div>
     `;
 
-    
+    el.querySelectorAll('.standings-league-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        this._standingsLeague = btn.dataset.league;
+        this.renderStandings();
+      });
+    });
+
     el.querySelectorAll('.standings-tab-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const key = btn.dataset.stab;
@@ -408,12 +376,11 @@ const Dashboard = {
         const thead = el.querySelector('thead tr th:last-child');
         if (thead) thead.textContent = tabLabels[key];
         const tbody = el.querySelector('#standings-rows');
-        if (tbody) tbody.innerHTML = renderRows(sortedForTab(key), key);
+        if (tbody) tbody.innerHTML = renderRows(sortedForTab(table, key), key);
       });
     });
   },
 
-  
   async renderFavorites() {
     const el   = document.getElementById('favorites-preview');
     if (!el) return;
@@ -425,34 +392,28 @@ const Dashboard = {
       return;
     }
 
-    
     el.innerHTML = `<div class="favs-grid">${favs.slice(0, 8).map(f => `
       <div class="fav-card" data-id="${f.id}" data-tipo="${f.tipo}" data-name="${f.name}" title="${f.name}">
         <div class="fav-card-photo" id="fav-photo-${f.id}">
-          <span class="fav-card-emoji">${f.flag || (f.tipo==='team'?'🏳️':'👤')}</span>
+          <span class="fav-card-emoji">${f.tipo==='team'?'🛡️':'👤'}</span>
         </div>
         <span class="fav-card-name">${f.name.split(' ')[0]}</span>
         <span class="fav-card-type">${f.tipo==='team'?'Equipo':'Jugador'}</span>
       </div>`).join('')}
     </div>`;
 
-    
     el.querySelectorAll('.fav-card').forEach(card => {
       card.addEventListener('click', () => this._showFavStats(
         card.dataset.id, card.dataset.tipo, card.dataset.name
       ));
     });
 
-    
     const pool = (typeof Gacha !== 'undefined') ? Gacha.getPool() : [];
     favs.slice(0, 8).forEach(async f => {
       if (f.tipo !== 'player') return;
       try {
-        
         const poolFig = pool.find(p => p.id === f.id || p.name.toLowerCase() === f.name.toLowerCase());
-        const url = poolFig
-          ? await API.getPhotoById(poolFig.id, poolFig.sdbName || poolFig.name)
-          : await API.getPlayerPhotosCached(f.name);
+        const url = poolFig ? await API.getPhotoById(poolFig.id) : null;
         if (!url) return;
         const wrap = document.getElementById(`fav-photo-${f.id}`);
         if (!wrap) return;
@@ -467,21 +428,18 @@ const Dashboard = {
     if (tipo === 'player') {
       const pool   = (typeof Gacha !== 'undefined') ? Gacha.getPool() : [];
       const poolFig = pool.find(p => p.id === id || p.name.toLowerCase() === name.toLowerCase());
-      
-      const photo  = poolFig
-        ? await API.getPhotoById(poolFig.id, poolFig.sdbName || poolFig.name).catch(()=>null)
-        : await API.getPlayerPhotosCached(name).catch(()=>null);
+      const photo  = poolFig ? await API.getPhotoById(poolFig.id).catch(()=>null) : null;
       const photoHtml = photo
         ? `<div style="width:110px;height:130px;margin:0 auto 0.75rem;border-radius:8px;overflow:hidden;border:2px solid var(--border-bright)">
              <img referrerpolicy="no-referrer" src="${photo}" style="width:100%;height:100%;object-fit:cover;object-position:top center;" onerror="this.style.display='none'">
            </div>`
-        : `<div style="font-size:3rem;margin-bottom:0.5rem">${'👤'}</div>`;
-      const p = poolFig || { name, pos:'—', team:'—', caps:0, goals:0, assists:0, rating:'—', flag:'' };
+        : `<div style="font-size:3rem;margin-bottom:0.5rem">👤</div>`;
+      const p = poolFig || { name, pos:'—', team:'—', caps:0, goals:0, assists:0, rating:'—' };
       Modal.open(`
         <div class="modal-player-detail">
           ${photoHtml}
           <h2 class="modal-player-name">${p.name}</h2>
-          <p class="modal-player-team">${p.flag||''} ${p.team}</p>
+          <p class="modal-player-team">${p.team}</p>
           <div style="display:flex;gap:0.5rem;justify-content:center;margin-bottom:1rem;flex-wrap:wrap">
             <span class="pos-badge">${p.pos}</span>
             ${p.rating ? `<span class="figurita-rating">⭐ ${p.rating}</span>` : ''}
@@ -493,47 +451,43 @@ const Dashboard = {
           </div>
         </div>`);
     } else {
-      
       Modal.open(`
         <div class="modal-player-detail">
-          <div style="font-size:3rem;margin-bottom:0.25rem">${name.split(' ')[0]}</div>
+          <div style="font-size:3rem;margin-bottom:0.25rem">🛡️</div>
           <h2 class="modal-player-name" style="margin-bottom:0.25rem">${name}</h2>
           <p style="font-size:0.65rem;color:var(--text-muted);margin-bottom:1rem">Cargando partidos...</p>
         </div>`);
 
-      
-      const [teams, teamData] = await Promise.all([
-        API.getTeams(''),
+      const leagues = (typeof API !== 'undefined' && API.getMainLeagues) ? API.getMainLeagues() : [];
+      const [teamsLists, teamData] = await Promise.all([
+        Promise.all(leagues.map(l => API.getTeams(l.id).catch(()=>[]))),
         API.getTeamMatches(name)
       ]);
+      const teams = teamsLists.flat();
       const team = teams.find(t => t.id === id || t.name === name);
-      const t = team || { name, flag:'🏳️', pj:0, w:0, d:0, l:0, gf:0, gc:0, pts:0 };
+      const t = team || { name, pj:0, w:0, d:0, l:0, gf:0, gc:0, pts:0 };
       const { played = [], upcoming = [] } = teamData || {};
 
       const _matchRow = (m, status) => {
-        const isHome     = (m.home || '').toLowerCase().includes(name.toLowerCase());
         const isLive     = status === 'live';
-        const isFriendly = m.type === 'friendly';
         const scoreStr   = (m.scoreHome !== null && m.scoreAway !== null)
           ? `${m.scoreHome} - ${m.scoreAway}` : '—';
+        const isHome = (m.home || '').toLowerCase().includes(name.toLowerCase());
         const resultColor = m.scoreHome !== null
           ? (isHome ? (m.scoreHome > m.scoreAway ? '#44ff88' : m.scoreHome < m.scoreAway ? '#ff4466' : '#aaa')
                     : (m.scoreAway > m.scoreHome ? '#44ff88' : m.scoreAway < m.scoreHome ? '#ff4466' : '#aaa'))
           : 'var(--text-muted)';
-        const badge = isFriendly
-          ? '<span style="font-size:0.45rem;padding:1px 4px;border-radius:6px;background:rgba(74,168,255,0.15);color:#4aa8ff;border:1px solid rgba(74,168,255,0.3)">AMI</span>'
-          : '<span style="font-size:0.45rem;padding:1px 4px;border-radius:6px;background:rgba(255,215,0,0.12);color:var(--gold);border:1px solid rgba(255,215,0,0.25)">WC</span>';
         return `
           <div style="display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid var(--border)">
-            ${badge}
+            <span style="font-size:0.45rem;padding:1px 4px;border-radius:6px;background:rgba(74,168,255,0.15);color:#4aa8ff;border:1px solid rgba(74,168,255,0.3)">${m.competition ? m.competition.slice(0,3).toUpperCase() : '—'}</span>
             <span style="flex:1;font-size:0.7rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
-              ${m.homeFlag||''} ${m.home}
+              ${Dashboard._crestImg(m.homeCrest, m.home)}${m.home}
             </span>
             <span style="font-size:0.72rem;font-weight:700;color:${isLive?'#ff4466':resultColor};min-width:40px;text-align:center">
               ${isLive ? `🔴 ${scoreStr}` : scoreStr}
             </span>
             <span style="flex:1;font-size:0.7rem;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
-              ${m.away} ${m.awayFlag||''}
+              ${m.away}${Dashboard._crestImg(m.awayCrest, m.away)}
             </span>
           </div>`;
       };
@@ -545,8 +499,8 @@ const Dashboard = {
       const upcomingHtml = upcoming.length
         ? upcoming.slice(0,5).map(m => `
           <div style="display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid var(--border)">
-            <span style="font-size:0.45rem;padding:1px 4px;border-radius:6px;${m.type==='friendly'?'background:rgba(74,168,255,0.15);color:#4aa8ff;border:1px solid rgba(74,168,255,0.3)':'background:rgba(255,215,0,0.12);color:var(--gold);border:1px solid rgba(255,215,0,0.25)'}">${m.type==='friendly'?'AMI':'WC'}</span>
-            <span style="flex:1;font-size:0.68rem">${m.homeFlag||''} ${m.home} vs ${m.away} ${m.awayFlag||''}</span>
+            <span style="font-size:0.45rem;padding:1px 4px;border-radius:6px;background:rgba(255,215,0,0.12);color:var(--gold);border:1px solid rgba(255,215,0,0.25)">${m.competition ? m.competition.slice(0,3).toUpperCase() : '—'}</span>
+            <span style="flex:1;font-size:0.68rem">${Dashboard._crestImg(m.homeCrest, m.home)}${m.home} vs ${m.away}${Dashboard._crestImg(m.awayCrest, m.away)}</span>
             <div style="text-align:right">
               <span style="font-size:0.65rem;color:var(--text-muted);display:block">${Dashboard._formatDate(m.date)} · ${m.time||''}</span>
               ${m.venue ? `<span style="font-size:0.58rem;color:var(--text-muted);opacity:0.7">📍 ${m.venue}</span>` : ''}
@@ -556,7 +510,7 @@ const Dashboard = {
 
       Modal.open(`
         <div class="modal-player-detail">
-          <div style="font-size:3rem;margin-bottom:0.25rem">${t.flag||'🏳️'}</div>
+          ${this._crestImg(t.crest, t.name).replace('width:16px;height:16px', 'width:64px;height:64px;margin:0 auto 0.5rem')}
           <h2 class="modal-player-name" style="margin-bottom:0.5rem">${t.name}</h2>
 
           <div class="modal-stats-row" style="flex-wrap:wrap;gap:0.6rem;margin-bottom:1rem">

@@ -200,8 +200,8 @@ const Battle = {
         </div>
         <div class="battle-mode-card ${BattleAttempts.remaining('quiz') === 0 ? 'bmode-exhausted' : ''}" id="bmode-quiz">
           <div class="bmode-icon">🧠</div>
-          <div class="bmode-title">Quiz Mundialista</div>
-          <div class="bmode-desc">5 preguntas sobre el Mundial. Cada acierto suma puntos.</div>
+          <div class="bmode-title">Quiz de Fútbol</div>
+          <div class="bmode-desc">5 preguntas sobre La Liga, Premier League y Champions. Cada acierto suma puntos.</div>
           <div class="bmode-reward">+2 tiradas + monedas</div>
           <div class="bmode-attempts">Intentos hoy: ${BattleAttempts.remaining('quiz')}/${BattleAttempts.MAX_DAILY}</div>
         </div>
@@ -600,61 +600,41 @@ const Battle = {
 
   
   _quizQuestions: [
-    { q:'¿En qué año se jugó el primer Mundial de Fútbol?',        opts:['1920','1926','1930','1934'],              ans:2 },
-    { q:'¿Qué país tiene más Mundiales ganados (5)?',              opts:['Alemania','Italia','Argentina','Brasil'],  ans:3 },
-    { q:'¿Quién es el máximo goleador histórico del Mundial?',     opts:['Mbappé','Klose','Ronaldo','Messi'], ans:3 },
-    { q:'¿Cuántos países participan en el Mundial 2026?',          opts:['32','36','40','48'],                      ans:3 },
-    { q:'¿Dónde se juega el partido inaugural del Mundial 2026?',  opts:['SoFi Stadium','MetLife','AT&T Stadium','Estadio Azteca'], ans:3 },
-    { q:'¿Qué selección ganó el Mundial 2022?',                    opts:['Francia','Brasil','Croacia','Argentina'], ans:3 },
-    { q:'¿Cuántos goles marcó Messi en el Mundial 2022?',          opts:['5','6','8','7'],                          ans:3 },
-    { q:'¿Qué jugador tiene más Mundiales ganados (5)?',           opts:['Ronaldo','Maradona','Zidane','Pelé'],      ans:3 },
-    { q:'¿En qué año ganó España su único Mundial?',               opts:['2006','2014','2018','2010'],               ans:3 },
-    { q:'¿Quién fue el portero de Argentina en Qatar 2022?',       opts:['Romero','Armani','Rulli','E. Martínez'],  ans:3 },
-    { q:'¿Qué selección no clasificó al Mundial 2026?',            opts:['Argentina','Brasil','México','Italia'],    ans:3 },
-    { q:'¿En qué país NO se jugará el Mundial 2026?',              opts:['México','Canadá','Estados Unidos','Colombia'], ans:3 },
-    { q:'¿Cuál es el apodo del Estadio Azteca?',                   opts:['La Bombonera','Camp Nou','Bernabéu','El Coloso de Santa Úrsula'], ans:3 },
-    { q:'¿Cuántas ediciones del Mundial hasta 2026?',              opts:['21','22','24','23'],                      ans:3 },
-    { q:'¿Quién ganó el Balón de Oro del Mundial 2022?',           opts:['Mbappé','Di María','Modric','Messi'],     ans:3 },
-    { q:'¿Quién es el DT de Argentina campeón en 2022?',           opts:['Bielsa','Sabella','Basile','Scaloni'],    ans:3 },
-    { q:'¿Cuántos goles marcó Haaland en la temporada 22/23?',     opts:['30','35','38','52'],                      ans:3 },
-    { q:'¿De qué país es Kylian Mbappé?',                          opts:['Bélgica','Senegal','Costa de Marfil','Francia'], ans:3 },
-    { q:'¿En qué posición juega Rodri?',                           opts:['Extremo','Delantero','Defensa','Mediocampista defensivo'], ans:3 },
-    { q:'¿Qué equipo ganó la Champions 2024?',                     opts:['Bayern','PSG','Arsenal','Real Madrid'],   ans:3 },
-    
-    { q:'¿Cuántas sedes tiene el Mundial 2026?',                   opts:['12','14','16','11'],                      ans:1 },
-    { q:'¿Cuál es la sede canadiense del Mundial 2026?',           opts:['Ottawa','Montreal','Toronto','Vancouver'], ans:2 },
-    { q:'¿Cuántos partidos tendrá el Mundial 2026?',               opts:['64','80','96','104'],                     ans:3 },
-    { q:'¿Qué formato de grupos usa el Mundial 2026?',             opts:['8 grupos de 6','12 grupos de 4','8 grupos de 4','16 grupos de 3'], ans:1 },
-    { q:'¿Cuál es el estadio de la final del Mundial 2026?',       opts:['SoFi Stadium','Rose Bowl','MetLife Stadium','AT&T Stadium'], ans:2 },
-    
-    { q:'¿Qué país organizó el Mundial 2022?',                     opts:['Emiratos Árabes','Arabia Saudita','Kuwait','Catar'], ans:3 },
-    { q:'¿Quién marcó el "Gol del Siglo" en 1986?',                opts:['Platini','Zico','Maradona','Butcher'],    ans:2 },
-    { q:'¿Cuántas veces ha sido anfitrión Brasil del Mundial?',    opts:['1','2','3','4'],                          ans:1 },
-    { q:'¿Qué equipo europeo ha ganado más Mundiales (4)?',        opts:['Francia','España','Alemania','Italia'],   ans:3 },
-    { q:'¿En qué Mundial se usó el VAR por primera vez?',          opts:['Rusia 2018','Brasil 2014','Catar 2022','Francia 1998'], ans:0 },
-    { q:'¿Cuál fue el primer Mundial celebrado en Asia?',          opts:['Japón/Corea 2002','China 2030','Catar 2022','Australia 2023'], ans:0 },
-    { q:'¿Cuántos penaltis erró Baggio en la final del 94?',       opts:['0','1','2','3'],                          ans:1 },
-    { q:'¿Qué jugador ganó el Balón de Oro 2023?',                 opts:['Benzema','Messi','Mbappé','Haaland'],     ans:1 },
-    
-    { q:'¿Qué selección tiene el récord de goles en un solo Mundial (27)?', opts:['Brasil','Hungría','Francia','Alemania'], ans:1 },
-    { q:'¿Cuántos goles marcó Mbappé en el Mundial 2022?',         opts:['6','7','8','9'],                          ans:2 },
-    { q:'¿Qué selección llegó a la final del Mundial 2022?',       opts:['Brasil','Portugal','Francia','Marruecos'], ans:2 },
-    { q:'¿Cuál es la selección con más participaciones mundialistas?', opts:['Brasil','Alemania','Italia','Argentina'], ans:0 },
-    { q:'¿Qué portero ganó el Guante de Oro en Qatar 2022?',       opts:['Courtois','Alisson','Lloris','E. Martínez'], ans:3 },
-    { q:'¿Qué selección fue eliminada en grupos en Qatar 2022 como gran sorpresa?', opts:['Alemania','España','Bélgica','Uruguay'], ans:0 },
-    
     { q:'¿Cuántas Champions League tiene el Real Madrid?',         opts:['13','14','15','16'],                      ans:2 },
-    { q:'¿Qué club ganó la Premier 2023-24?',                      opts:['Arsenal','Liverpool','Man City','Chelsea'], ans:2 },
-    { q:'¿En qué estadio se jugó la final de la Champions 2024?',  opts:['Wembley','Bernabéu','Allianz Arena','Estadio Olímpico de Londres'], ans:0 },
+    { q:'¿Qué club ganó la Premier League 2023-24?',                opts:['Arsenal','Liverpool','Man City','Chelsea'], ans:2 },
+    { q:'¿Qué club ganó La Liga 2023-24?',                          opts:['Barcelona','Real Madrid','Atlético','Girona'], ans:1 },
     { q:'¿Quién fue el máximo goleador de La Liga 2023-24?',       opts:['Vinícius','Bellingham','Lewandowski','Artem Dovbyk'], ans:3 },
-    { q:'¿Qué equipo ganó la Libertadores 2023?',                  opts:['Fluminense','Boca Juniors','River Plate','Atlético Mineiro'], ans:0 },
-    
-    { q:'¿Cuántos árbitros participan en un partido oficial FIFA actualmente (con VAR)?', opts:['4','5','6','7'], ans:2 },
-    { q:'¿Qué medida tiene el campo de fútbol según FIFA (largo máx.)?', opts:['100m','110m','120m','130m'],        ans:2 },
-    { q:'¿Qué jugador tiene más seguidores en Instagram (fútbol)?', opts:['Mbappé','Ronaldo','Messi','Neymar'],     ans:1 },
-    { q:'¿Cuántos minutos dura la prórroga en un partido de fútbol?', opts:['20','25','30','40'],                   ans:2 },
-    { q:'¿Qué selección tiene el uniforme más antiguo del mundo (desde 1872)?', opts:['Inglaterra','Escocia','Gales','Irlanda'], ans:1 },
-    { q:'¿Qué selección ganó la Copa América 2024?',               opts:['Brasil','Colombia','Uruguay','Argentina'], ans:3 },
+    { q:'¿En qué estadio juega el Real Madrid?',                   opts:['Camp Nou','Metropolitano','Santiago Bernabéu','San Mamés'], ans:2 },
+    { q:'¿En qué estadio juega el FC Barcelona?',                  opts:['Camp Nou','Wanda Metropolitano','Mestalla','Anoeta'], ans:0 },
+    { q:'¿Cuál es el estadio del Manchester United?',              opts:['Etihad Stadium','Old Trafford','Anfield','Emirates Stadium'], ans:1 },
+    { q:'¿Cuál es el estadio del Liverpool?',                      opts:['Anfield','Goodison Park','Villa Park','St James Park'], ans:0 },
+    { q:'¿Cuál es el estadio del Manchester City?',                opts:['Old Trafford','Etihad Stadium','Emirates','Stamford Bridge'], ans:1 },
+    { q:'¿En qué club juega actualmente Kylian Mbappé?',           opts:['PSG','Real Madrid','Liverpool','Chelsea'], ans:1 },
+    { q:'¿En qué club juega actualmente Erling Haaland?',          opts:['Borussia Dortmund','Manchester City','Real Madrid','Bayern Múnich'], ans:1 },
+    { q:'¿En qué club juega actualmente Mohamed Salah?',           opts:['Liverpool','Chelsea','Arsenal','Al-Ittihad'], ans:0 },
+    { q:'¿En qué club juega actualmente Jude Bellingham?',         opts:['Borussia Dortmund','Real Madrid','Manchester City','Barcelona'], ans:1 },
+    { q:'¿En qué club juega actualmente Lamine Yamal?',            opts:['Real Madrid','Atlético de Madrid','Barcelona','Girona'], ans:2 },
+    { q:'¿Cuántas Premier League ha ganado el Manchester City desde 2018?', opts:['2','3','4','6'],                  ans:3 },
+    { q:'¿Qué equipo ganó la Champions League 2024?',              opts:['Bayern','PSG','Borussia Dortmund','Real Madrid'], ans:3 },
+    { q:'¿Qué equipo ganó la Champions League 2023?',              opts:['Manchester City','Inter de Milán','Real Madrid','Liverpool'], ans:0 },
+    { q:'¿En qué estadio se jugó la final de la Champions 2024?',  opts:['Wembley','Bernabéu','Allianz Arena','Estadio Olímpico de Londres'], ans:0 },
+    { q:'¿Qué club ganó la última Copa del Rey?',                  opts:['Barcelona','Real Madrid','Athletic Club','Real Sociedad'], ans:2 },
+    { q:'¿Qué club ganó la última FA Cup?',                        opts:['Manchester United','Manchester City','Chelsea','Crystal Palace'], ans:3 },
+    { q:'¿Quién es el máximo goleador histórico de la Champions League?', opts:['Messi','Ronaldo','Lewandowski','Benzema'], ans:1 },
+    { q:'¿Qué club tiene el mayor número de títulos de Premier League?', opts:['Liverpool','Arsenal','Manchester United','Chelsea'], ans:2 },
+    { q:'¿Qué club tiene el mayor número de títulos de La Liga?',  opts:['Atlético de Madrid','Barcelona','Real Madrid','Valencia'], ans:2 },
+    { q:'¿En qué ciudad juega el Athletic Club?',                  opts:['Bilbao','San Sebastián','Vigo','Vitoria'], ans:0 },
+    { q:'¿Cuál es el rival histórico del Real Madrid en La Liga?', opts:['Sevilla','Valencia','Barcelona','Atlético'], ans:2 },
+    { q:'¿Cómo se conoce al derbi entre Manchester United y Manchester City?', opts:['Derbi del Norte','Derbi de Manchester','Derbi Rojo','Clásico Inglés'], ans:1 },
+    { q:'¿Qué competición reúne a los mejores clubes de Europa cada temporada?', opts:['Europa League','Conference League','Champions League','Community Shield'], ans:2 },
+    { q:'¿Qué trofeo enfrenta al campeón de la Premier League con el de la FA Cup?', opts:['Community Shield','Carabao Cup','EFL Trophy','Charity Cup'], ans:0 },
+    { q:'¿Qué trofeo enfrenta al campeón de La Liga con el de la Copa del Rey?', opts:['Supercopa de España','Copa de Campeones','Trofeo Bernabéu','Copa Federación'], ans:0 },
+    { q:'¿Cuántos equipos participan en la Premier League?',       opts:['18','20','22','24'],                       ans:1 },
+    { q:'¿Cuántos equipos participan en La Liga?',                 opts:['18','20','22','24'],                       ans:1 },
+    { q:'¿Qué formato usa la fase de liga de la Champions League desde 2024?', opts:['Grupos de 4','Liga única de 36 equipos','Eliminación directa','Grupos de 8'], ans:1 },
+    { q:'¿Quién es el entrenador que más Champions League ha ganado?', opts:['Ancelotti','Guardiola','Zidane','Ferguson'], ans:0 },
+    { q:'¿Qué jugador ganó el Balón de Oro 2023?',                 opts:['Benzema','Messi','Mbappé','Haaland'],     ans:1 },
+    { q:'¿En qué posición juega Rodri?',                           opts:['Extremo','Delantero','Defensa','Mediocampista defensivo'], ans:3 },
   ],
 
   async startQuizBattle() {
@@ -857,7 +837,7 @@ const Battle = {
     const players = teams.map(t => byTeam[t][Math.floor(Math.random()*byTeam[t].length)]);
 
     const shuffledPlayers = [...players].sort(() => Math.random() - 0.5).map(p => Object.assign({}, p));
-    const shuffledTeams   = [...players].sort(() => Math.random() - 0.5).map(p => ({ name: p.team, flag: p.flag }));
+    const shuffledTeams   = [...players].sort(() => Math.random() - 0.5).map(p => ({ name: p.team }));
 
     let selectedPlayer = null;
     let matched = 0;
@@ -878,7 +858,7 @@ const Battle = {
       const teamsHtml = activeTeams.map((t, i) =>
         `<button class="btn connect-team-btn connect-card-in" style="animation-delay:${i*0.05}s"
            data-idx="${shuffledTeams.indexOf(t)}">
-           ${t.flag} ${t.name}
+           🛡️ ${t.name}
          </button>`
       ).join('');
 
@@ -920,7 +900,7 @@ const Battle = {
               selectedPlayer._matched = true;
               teamData._matched = true;
               matched++;
-              Toast.success(`✅ ¡Correcto! ${selectedPlayer.name} → ${teamData.flag} ${teamData.name}`);
+              Toast.success(`✅ ¡Correcto! ${selectedPlayer.name} → ${teamData.name}`);
               btn.classList.add('connect-correct');
               playerBtn?.classList.add('connect-correct');
               const wasLast = matched >= players.length;
@@ -930,7 +910,7 @@ const Battle = {
                 else render();
               }, 350);
             } else {
-              Toast.error(`❌ ¡Incorrecto! ${selectedPlayer.name} no juega en ${teamData.flag} ${teamData.name}`);
+              Toast.error(`❌ ¡Incorrecto! ${selectedPlayer.name} no juega en ${teamData.name}`);
               btn.classList.add('connect-wrong');
               playerBtn?.classList.add('connect-wrong');
               setTimeout(() => {

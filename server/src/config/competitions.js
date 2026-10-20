@@ -9,29 +9,58 @@
  *   https://site.api.espn.com/apis/site/v2/sports/soccer/{slug}/summary?event={id}
  *
  * El "slug" es el identificador interno que usa ESPN para cada liga/torneo.
- * Puedes agregar más competiciones aquí sin tocar el resto del código.
+ *
+ * La app está enfocada en clubes, con TRES competiciones principales
+ * (las que se siguen a nivel de jugadores/equipos con tabla propia):
+ *   - La Liga (España)
+ *   - Premier League (Inglaterra)
+ *   - UEFA Champions League
+ *
+ * Además se incluyen competiciones "secundarias": copas locales en las
+ * que participan los mismos clubes (Real Madrid, Barcelona, Atlético,
+ * Manchester City, Liverpool, Manchester United, etc.) y cuyos partidos
+ * también se muestran en la app (calendario/resultados), aunque no
+ * tengan tabla de posiciones propia tipo liga.
  */
 
-const COMPETITIONS = [
-  { id: "eng.1", name: "Premier League", country: "Inglaterra" },
-  { id: "esp.1", name: "La Liga", country: "España" },
-  { id: "ita.1", name: "Serie A", country: "Italia" },
-  { id: "ger.1", name: "Bundesliga", country: "Alemania" },
-  { id: "fra.1", name: "Ligue 1", country: "Francia" },
-  { id: "usa.1", name: "MLS", country: "Estados Unidos" },
-  { id: "mex.1", name: "Liga MX", country: "México" },
-  { id: "uefa.champions", name: "UEFA Champions League", country: "Europa" },
-  { id: "uefa.europa", name: "UEFA Europa League", country: "Europa" },
-  { id: "conmebol.libertadores", name: "Copa Libertadores", country: "Sudamérica" },
-  { id: "fifa.world", name: "FIFA World Cup", country: "Internacional" },
-  { id: "sv.1", name: "Primera División El Salvador", country: "El Salvador" }
+// Competiciones principales: tienen tabla de posiciones y son el foco
+// de la app (predicciones, seguimiento de jugadores/equipos).
+const MAIN_COMPETITIONS = [
+  { id: "esp.1", name: "La Liga", country: "España", tier: "main" },
+  { id: "eng.1", name: "Premier League", country: "Inglaterra", tier: "main" },
+  { id: "uefa.champions", name: "UEFA Champions League", country: "Europa", tier: "main" }
 ];
 
+// Competiciones secundarias: copas domésticas/locales donde participan
+// los mismos clubes de las ligas principales. Se muestran sus partidos
+// (calendario, resultados, en vivo) pero no tienen tabla de posiciones
+// tipo liga en el dashboard.
+const SECONDARY_COMPETITIONS = [
+  { id: "esp.copa_del_rey", name: "Copa del Rey", country: "España", tier: "secondary" },
+  { id: "esp.super_cup", name: "Supercopa de España", country: "España", tier: "secondary" },
+  { id: "eng.fa", name: "FA Cup", country: "Inglaterra", tier: "secondary" },
+  { id: "eng.league_cup", name: "Carabao Cup", country: "Inglaterra", tier: "secondary" },
+  { id: "eng.charity", name: "FA Community Shield", country: "Inglaterra", tier: "secondary" }
+];
+
+const COMPETITIONS = [...MAIN_COMPETITIONS, ...SECONDARY_COMPETITIONS];
+
 // Slug por defecto cuando no se especifica liga en la query (?league=)
-const DEFAULT_LEAGUE = "eng.1";
+const DEFAULT_LEAGUE = "esp.1";
 
 function isValidLeague(slug) {
   return COMPETITIONS.some((c) => c.id === slug);
 }
 
-module.exports = { COMPETITIONS, DEFAULT_LEAGUE, isValidLeague };
+function isMainLeague(slug) {
+  return MAIN_COMPETITIONS.some((c) => c.id === slug);
+}
+
+module.exports = {
+  COMPETITIONS,
+  MAIN_COMPETITIONS,
+  SECONDARY_COMPETITIONS,
+  DEFAULT_LEAGUE,
+  isValidLeague,
+  isMainLeague
+};

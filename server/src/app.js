@@ -21,9 +21,17 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Pequeño logger de requests, útil en desarrollo
+// Logger de requests: línea al recibir y línea al responder (estado, tiempo y
+// resumen de fuente/caché que dejan las rutas en res.locals.logInfo).
 app.use((req, res, next) => {
+  const t0 = Date.now();
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
+  res.on("finish", () => {
+    console.log(
+      `[${new Date().toISOString()}] -> ${res.statusCode} ${req.method} ${req.path} ${Date.now() - t0}ms` +
+        (res.locals.logInfo ? ` ${res.locals.logInfo}` : "")
+    );
+  });
   next();
 });
 
@@ -34,8 +42,9 @@ app.get("/", (req, res) => {
     message: "⚽ Futbol API - datos de partidos, resultados, en vivo y tablas",
     endpoints: [
       "GET /matches?league=eng.1&date=YYYYMMDD",
+      "GET /matches?league=eng.1&from=YYYYMMDD&to=YYYYMMDD",
       "GET /live",
-      "GET /match/:id",
+      "GET /match/:id?league=esp.1",
       "GET /standings?league=eng.1",
       "GET /competitions"
     ]

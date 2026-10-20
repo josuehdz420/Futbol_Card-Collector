@@ -175,7 +175,7 @@ const Album = {
              </div>`
           : `<div style="font-size:2.5rem;margin-bottom:0.75rem">${this._emojiStr(fig.emoji)}</div>`}
         <h2 class="modal-player-name">${fig.name}</h2>
-        <p class="modal-player-team">${fig.flag||''} ${fig.team}</p>
+        <p class="modal-player-team">${fig.team}</p>
         <div style="display:flex;gap:0.5rem;justify-content:center;margin-bottom:1rem;flex-wrap:wrap">
           <span class="rarity ${fig.rareza}">${Gacha.getRarityLabel(fig.rareza)}</span>
           <span class="pos-badge">${fig.pos}</span>

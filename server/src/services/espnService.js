@@ -2,55 +2,296 @@
  * services/espnService.js
  * --------------------------------------------------
  * Capa de acceso a datos. Consume los endpoints públicos JSON de ESPN
- * (no oficiales, sin necesidad de API key) y normaliza la respuesta a un
- * formato simple y consistente para nuestra API.
+ * (no oficiales, sin API key) y normaliza la respuesta.
  *
- * Endpoints públicos usados (gratuitos, sin auth):
- *   Scoreboard: https://site.api.espn.com/apis/site/v2/sports/soccer/{league}/scoreboard
- *   Standings:  https://site.api.espn.com/apis/site/v2/sports/soccer/{league}/standings
- *   Summary:    https://site.api.espn.com/apis/site/v2/sports/soccer/{league}/summary?event={id}
+ *   Scoreboard: {BASE}/{league}/scoreboard?dates=YYYYMMDD[-YYYYMMDD]
+ *   Standings:  https://site.api.espn.com/apis/v2/sports/soccer/{league}/standings
+ *               (el /apis/site/v2/.../standings solo devuelve un stub sin tabla)
+ *   Summary:    {BASE}/{league}/summary?event={id}
  *
- * Todo el resultado pasa por utils/cache.js para no golpear ESPN en cada
- * request entrante a nuestra propia API.
+ * Principios (ver informe de diagnóstico):
+ *   - Un fallo de ESPN NUNCA se convierte en "lista vacía con success:true".
+ *     Se distingue: error (se lanza ApiError con code), respuesta parcial
+ *     (meta.partial) y respuesta válida sin eventos (meta.verifiedEmpty).
+ *   - Los rangos largos se parten en ventanas pequeñas y con concurrencia
+ *     limitada (antes: hasta 60 peticiones simultáneas por liga).
+ *   - Si ESPN falla se sirve el último dato bueno como respaldo ("stale").
+ *   - Peticiones idénticas concurrentes comparten una sola llamada a ESPN.
+ *
+ * Variables de entorno opcionales: ESPN_BASE_URL, ESPN_STANDINGS_BASE_URL,
+ * ESPN_TIMEOUT_MS, ESPN_MAX_CONCURRENCY, LOG_LEVEL.
  */
 
 const axios = require("axios");
 const cache = require("../utils/cache");
+const logger = require("../utils/logger");
 const { ApiError } = require("../utils/errors");
-const { COMPETITIONS, DEFAULT_LEAGUE, isValidLeague } = require("../config/competitions");
+const {
+  COMPETITIONS,
+  DEFAULT_LEAGUE,
+  isValidLeague,
+  isMainLeague
+} = require("../config/competitions");
 
-const BASE_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer";
+const BASE_URL = process.env.ESPN_BASE_URL || "https://site.api.espn.com/apis/site/v2/sports/soccer";
+const STANDINGS_V2_BASE_URL =
+  process.env.ESPN_STANDINGS_BASE_URL || "https://site.api.espn.com/apis/v2/sports/soccer";
+const TIMEOUT_MS = Number(process.env.ESPN_TIMEOUT_MS) || 10000;
+const MAX_CONCURRENCY = Number(process.env.ESPN_MAX_CONCURRENCY) || 6;
+const MAX_ATTEMPTS = 2; // 1 intento + 1 reintento (solo errores transitorios)
+
+// Rangos: ventanas de N días y tope de seguridad (se rechaza, no se trunca).
+const RANGE_CHUNK_DAYS = 14;
+const MAX_RANGE_DAYS = 120;
 
 // Tiempos de vida del cache (ms)
 const TTL = {
-  SCOREBOARD: 60 * 1000, // 1 minuto para partidos/resultados generales
-  LIVE: 30 * 1000, // 30s para partidos en vivo (se refresca aparte cada 5 min igual)
-  STANDINGS: 10 * 60 * 1000, // 10 minutos para tablas (cambian poco)
-  MATCH: 30 * 1000 // 30s para detalle de un partido
+  TODAY: 30 * 1000, // scoreboard "de hoy": puede haber partidos en vivo
+  SCOREBOARD: 60 * 1000, // scoreboard de una fecha / rango
+  EMPTY: 60 * 1000, // respuesta válida sin eventos
+  PARTIAL: 15 * 1000, // respuesta incompleta: reintentar pronto
+  STANDINGS: 10 * 60 * 1000,
+  MATCH_LIVE: 20 * 1000,
+  MATCH_PRE: 60 * 1000,
+  MATCH_FINISHED: 10 * 60 * 1000
 };
 
 const http = axios.create({
-  timeout: 10000,
+  timeout: TIMEOUT_MS,
   headers: {
-    // Algunos endpoints públicos de ESPN responden mejor con un User-Agent
-    // de navegador normal en vez del default de axios.
     "User-Agent":
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+    Accept: "application/json, text/plain, */*",
+    "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+    Referer: "https://www.espn.com/"
   }
 });
 
-/**
- * Hace un GET con manejo de errores uniforme.
- */
-async function safeGet(url) {
-  try {
-    const { data } = await http.get(url);
-    return data;
-  } catch (err) {
-    const status = err.response?.status || 502;
-    throw new ApiError(`Error consultando fuente de datos (ESPN): ${err.message}`, status);
+// ---------------------------------------------------------------------------
+// Red: limitador de concurrencia + GET con clasificación de errores y logs
+// ---------------------------------------------------------------------------
+
+let active = 0;
+const waiting = [];
+function schedule(fn) {
+  return new Promise((resolve, reject) => {
+    const run = () => {
+      active++;
+      fn()
+        .then(resolve, reject)
+        .finally(() => {
+          active--;
+          if (waiting.length) waiting.shift()();
+        });
+    };
+    active < MAX_CONCURRENCY ? run() : waiting.push(run);
+  });
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Freno ante bloqueo: si ESPN responde 403/429, seguir insistiendo solo alarga
+// el bloqueo. Se pausan TODAS las llamadas a ESPN (2, 4, 8... hasta 15 min) y
+// mientras tanto se responde al instante con upstream_blocked (o con el último
+// dato bueno si existe). Una respuesta correcta reinicia el contador.
+let blockedUntil = 0;
+let blockStrikes = 0;
+
+function assertNotBlocked() {
+  const left = blockedUntil - Date.now();
+  if (left > 0) {
+    throw new ApiError(
+      `ESPN está bloqueando las peticiones de este servidor (403/429). Pausa automática: reintento en ${Math.ceil(left / 1000)} s`,
+      503,
+      { code: "upstream_blocked", details: { retryInSeconds: Math.ceil(left / 1000), strikes: blockStrikes } }
+    );
   }
 }
+
+function registerBlock(status) {
+  if (Date.now() < blockedUntil) return; // fallos simultáneos de la misma ráfaga: un solo strike
+  blockStrikes++;
+  const ms = Math.min(2 * 60 * 1000 * 2 ** (blockStrikes - 1), 15 * 60 * 1000);
+  blockedUntil = Date.now() + ms;
+  logger.error("espn", "ESPN bloquea las peticiones: se pausan las llamadas", {
+    upstreamStatus: status,
+    pauseS: Math.round(ms / 1000),
+    strikes: blockStrikes
+  });
+}
+
+/** Convierte cualquier error de axios en un ApiError con code/estado claros. */
+function toApiError(raw) {
+  if (raw instanceof ApiError) return raw;
+  const upstreamStatus = raw.response?.status;
+  if (upstreamStatus) {
+    if (upstreamStatus === 404) {
+      return new ApiError("ESPN respondió 404 (recurso no encontrado)", 404, {
+        code: "upstream_not_found",
+        details: { upstreamStatus }
+      });
+    }
+    if (upstreamStatus === 429) {
+      return new ApiError("ESPN limitó las peticiones (HTTP 429)", 503, {
+        code: "upstream_rate_limited",
+        details: { upstreamStatus },
+        retryable: true
+      });
+    }
+    return new ApiError(`ESPN respondió con error HTTP ${upstreamStatus}`, 502, {
+      code: "upstream_http_error",
+      details: { upstreamStatus },
+      retryable: upstreamStatus >= 500
+    });
+  }
+  if (raw.code === "ECONNABORTED" || raw.code === "ETIMEDOUT") {
+    return new ApiError(`ESPN no respondió en ${TIMEOUT_MS} ms (timeout)`, 504, {
+      code: "upstream_timeout",
+      retryable: true
+    });
+  }
+  return new ApiError(`No se pudo conectar con ESPN (${raw.code || raw.message})`, 502, {
+    code: "upstream_unreachable",
+    details: { cause: raw.code || null },
+    retryable: true
+  });
+}
+
+/**
+ * GET JSON a ESPN. Devuelve { data, ms }. Lanza ApiError clasificado.
+ * Reintenta una vez solo ante timeout / conexión / 5xx / 429.
+ */
+async function fetchJson(url, label, opts = {}) {
+  assertNotBlocked();
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const t0 = Date.now();
+    try {
+      const res = await schedule(() => http.get(url));
+      blockStrikes = 0;
+      blockedUntil = 0;
+      const ms = Date.now() - t0;
+      if (!res.data || typeof res.data !== "object") {
+        throw new ApiError("ESPN devolvió una respuesta que no es JSON (¿HTML de error?)", 502, {
+          code: "upstream_bad_format",
+          details: { upstreamStatus: res.status }
+        });
+      }
+      logger.debug("espn", `GET ${label}`, { status: res.status, ms, attempt });
+      if (ms > 3000) logger.warn("espn", `Respuesta lenta ${label}`, { status: res.status, ms });
+      return { data: res.data, ms };
+    } catch (raw) {
+      const err = toApiError(raw);
+      if (!opts.skipBlockDetection && (err.details?.upstreamStatus === 403 || err.details?.upstreamStatus === 429)) {
+        registerBlock(err.details.upstreamStatus);
+      }
+      logger.warn("espn", `FALLO ${label}`, {
+        code: err.code,
+        upstreamStatus: err.details?.upstreamStatus,
+        ms: Date.now() - t0,
+        attempt,
+        willRetry: attempt < MAX_ATTEMPTS && err.retryable
+      });
+      if (attempt < MAX_ATTEMPTS && err.retryable) {
+        await sleep(300 + Math.random() * 300);
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Fechas
+// ---------------------------------------------------------------------------
+
+const pad = (n) => String(n).padStart(2, "0");
+
+function parseYmd(s) {
+  if (!/^\d{8}$/.test(String(s))) return null;
+  const d = new Date(`${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}T00:00:00Z`);
+  if (isNaN(d)) return null;
+  // Rechaza fechas imposibles que Date "corrige" (20260231 -> 3 de marzo)
+  return toYmd(d) === s ? d : null;
+}
+
+function toYmd(d) {
+  return `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}`;
+}
+
+function assertDate(dateStr) {
+  if (dateStr && !parseYmd(dateStr)) {
+    throw new ApiError(`Fecha inválida: "${dateStr}" (formato esperado YYYYMMDD)`, 400, {
+      code: "invalid_date"
+    });
+  }
+}
+
+/** Valida y devuelve { from, to, days }. Rechaza (400) en vez de truncar. */
+function assertRange(fromStr, toStr) {
+  if (!fromStr || !toStr) {
+    throw new ApiError("Se requieren los parámetros 'from' y 'to' (YYYYMMDD)", 400, {
+      code: "invalid_date_range"
+    });
+  }
+  const from = parseYmd(fromStr);
+  const to = parseYmd(toStr);
+  if (!from || !to) {
+    throw new ApiError(`Rango inválido: from=${fromStr} to=${toStr} (formato YYYYMMDD)`, 400, {
+      code: "invalid_date_range"
+    });
+  }
+  if (from > to) {
+    throw new ApiError("Rango inválido: 'from' es posterior a 'to'", 400, { code: "invalid_date_range" });
+  }
+  const days = Math.round((to - from) / 86400000) + 1;
+  if (days > MAX_RANGE_DAYS) {
+    throw new ApiError(`Rango demasiado amplio (${days} días; máximo ${MAX_RANGE_DAYS})`, 400, {
+      code: "range_too_large"
+    });
+  }
+  return { from, to, days };
+}
+
+/** Parte [from,to] en ventanas de `chunkDays` días: [["YYYYMMDD","YYYYMMDD"], ...] */
+function splitRange(fromStr, toStr, chunkDays = RANGE_CHUNK_DAYS) {
+  const from = parseYmd(fromStr);
+  const to = parseYmd(toStr);
+  const windows = [];
+  const cursor = new Date(from);
+  while (cursor <= to) {
+    const start = new Date(cursor);
+    const end = new Date(cursor);
+    end.setUTCDate(end.getUTCDate() + chunkDays - 1);
+    if (end > to) end.setTime(to.getTime());
+    windows.push([toYmd(start), toYmd(end)]);
+    cursor.setUTCDate(cursor.getUTCDate() + chunkDays);
+  }
+  return windows;
+}
+
+function enumerateDates(fromStr, toStr) {
+  const out = [];
+  const cursor = parseYmd(fromStr);
+  const to = parseYmd(toStr);
+  while (cursor <= to) {
+    out.push(toYmd(cursor));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return out;
+}
+
+/** ¿La fecha del evento cae en la ventana (con ±1 día por zonas horarias)? */
+function eventInWindow(ev, fromStr, toStr) {
+  const t = new Date(ev.date).getTime();
+  if (isNaN(t)) return true; // sin fecha fiable: no lo usamos para acusar a ESPN
+  const lo = parseYmd(fromStr).getTime() - 86400000;
+  const hi = parseYmd(toStr).getTime() + 2 * 86400000;
+  return t >= lo && t < hi;
+}
+
+// ---------------------------------------------------------------------------
+// Normalización
+// ---------------------------------------------------------------------------
 
 /**
  * Normaliza un "event" del scoreboard de ESPN a un objeto de partido simple.
@@ -69,9 +310,10 @@ function normalizeEvent(event, leagueId) {
     round: note,
     status: {
       state: status.state, // "pre" | "in" | "post"
-      description: status.description || null, // ej. "Halftime", "Extra Time", "Penalty Shoot-out"
+      description: status.description || null, // ej. "Halftime", "Extra Time"
       detail: status.detail, // ej. "FT", "Live - 65'"
       shortDetail: status.shortDetail,
+      displayClock: event.status?.displayClock || competition?.status?.displayClock || null,
       isLive: status.state === "in",
       completed: !!status.completed
     },
@@ -99,169 +341,350 @@ function normalizeEvent(event, leagueId) {
   };
 }
 
-/**
- * Obtiene el scoreboard (partidos del día / rango) de una liga.
- * ESPN acepta opcionalmente ?dates=YYYYMMDD para un día específico.
- */
-async function getScoreboard(leagueId = DEFAULT_LEAGUE, dateStr = null) {
-  if (!isValidLeague(leagueId)) {
-    throw new ApiError(`Liga no soportada: ${leagueId}`, 400);
-  }
+/** Valida la forma de un scoreboard. Una respuesta sin `events` ni otras claves de scoreboard es inválida. */
+function extractEvents(data, label) {
+  if (Array.isArray(data.events)) return data.events;
+  if (data.leagues || data.day || data.season) return []; // forma válida de "sin eventos"
+  throw new ApiError(`Formato inesperado en scoreboard de ESPN (${label}): falta "events"`, 502, {
+    code: "upstream_bad_format"
+  });
+}
 
-  const cacheKey = `scoreboard:${leagueId}:${dateStr || "today"}`;
-  const cached = cache.get(cacheKey);
-  if (cached) return cached;
+// ---------------------------------------------------------------------------
+// Caché "read-through" con respaldo (stale) y dedupe
+// ---------------------------------------------------------------------------
 
-  let url = `${BASE_URL}/${leagueId}/scoreboard`;
-  if (dateStr) {
-    url += `?dates=${dateStr}`;
-  }
-
-  const data = await safeGet(url);
-  const events = data.events || [];
-  const matches = events.map((ev) => normalizeEvent(ev, leagueId));
-
-  cache.set(cacheKey, matches, TTL.SCOREBOARD);
-  return matches;
+function ttlFor(payload, normalTtl) {
+  if (payload.partial) return TTL.PARTIAL;
+  if (payload.fallback) return Math.max(normalTtl, 5 * 60 * 1000); // modo día a día es caro: se cachea más
+  if (Array.isArray(payload.data) && payload.data.length === 0) return TTL.EMPTY;
+  return normalTtl;
 }
 
 /**
- * Obtiene el scoreboard de una liga para un RANGO de fechas
- * (ESPN soporta ?dates=YYYYMMDD-YYYYMMDD). Esto permite traer partidos
- * de días pasados (resultados/historial) junto con los futuros en una
- * sola consulta. Se cachea por rango.
+ * loader() -> payload { data, partial, warnings, upstream }.
+ * Devuelve { ...payload, source: 'cache'|'espn'|'stale', stale }.
+ * Si loader falla y existe un valor previo, se sirve como respaldo.
  */
-async function getScoreboardRange(leagueId = DEFAULT_LEAGUE, fromStr, toStr) {
-  if (!isValidLeague(leagueId)) {
-    throw new ApiError(`Liga no soportada: ${leagueId}`, 400);
-  }
-  if (!fromStr || !toStr) {
-    throw new ApiError("Se requieren los parámetros 'from' y 'to' (YYYYMMDD)", 400);
-  }
+async function readThrough(key, loader, normalTtl, fixedTtl = null) {
+  const hit = cache.get(key);
+  if (hit) return { ...hit, source: "cache", stale: false };
 
-  const cacheKey = `scoreboard:${leagueId}:${fromStr}-${toStr}`;
-  const cached = cache.get(cacheKey);
-  if (cached) return cached;
-
-  const url = `${BASE_URL}/${leagueId}/scoreboard?dates=${fromStr}-${toStr}`;
-  const data = await safeGet(url);
-  let events = data.events || [];
-
-  // Algunos endpoints de ESPN ignoran rangos demasiado amplios y devuelven
-  // solo el día actual; si detectamos pocos resultados, reforzamos con
-  // requests día por día para no perder histórico/futuro.
-  if (events.length === 0) {
-    const days = _enumerateDates(fromStr, toStr);
-    const results = await Promise.allSettled(
-      days.map((d) => safeGet(`${BASE_URL}/${leagueId}/scoreboard?dates=${d}`))
-    );
-    events = results
-      .filter((r) => r.status === "fulfilled")
-      .flatMap((r) => r.value.events || []);
-  }
-
-  // Deduplicar por id (por si el rango y el fallback día-a-día se solapan)
-  const seen = new Set();
-  const matches = [];
-  for (const ev of events) {
-    if (seen.has(ev.id)) continue;
-    seen.add(ev.id);
-    matches.push(normalizeEvent(ev, leagueId));
-  }
-
-  matches.sort((a, b) => new Date(a.date) - new Date(b.date));
-
-  cache.set(cacheKey, matches, TTL.SCOREBOARD);
-  return matches;
+  return cache.once(key, async () => {
+    try {
+      const payload = await loader();
+      cache.set(key, payload, fixedTtl ?? ttlFor(payload, normalTtl));
+      return { ...payload, source: "espn", stale: false };
+    } catch (err) {
+      const stale = cache.getStale(key);
+      if (stale) {
+        logger.warn("cache", "ESPN falló: se sirve respaldo caducado", {
+          key,
+          code: err.code,
+          expiredAgoS: Math.round((Date.now() - stale.expiresAt) / 1000)
+        });
+        return {
+          ...stale.value,
+          source: "stale",
+          stale: true,
+          partial: true,
+          warnings: [
+            ...(stale.value.warnings || []),
+            { code: err.code || "upstream_error", message: err.message }
+          ]
+        };
+      }
+      throw err;
+    }
+  });
 }
 
-/**
- * Obtiene partidos de TODAS las competiciones soportadas en un rango de
- * fechas (histórico + futuro combinado y ordenado cronológicamente).
- */
-async function getAllMatchesRange(fromStr, toStr) {
-  const cacheKey = `matches:all:${fromStr}-${toStr}`;
-  const cached = cache.get(cacheKey);
-  if (cached) return cached;
+function assertLeague(leagueId) {
+  if (!isValidLeague(leagueId)) {
+    throw new ApiError(`Liga no soportada: ${leagueId}`, 400, { code: "invalid_league" });
+  }
+}
 
-  const results = await Promise.allSettled(
-    COMPETITIONS.map((c) => getScoreboardRange(c.id, fromStr, toStr))
+// ---------------------------------------------------------------------------
+// Scoreboard (un día)
+// ---------------------------------------------------------------------------
+
+async function loadSingleDay(leagueId, dateStr) {
+  const url = `${BASE_URL}/${leagueId}/scoreboard${dateStr ? `?dates=${dateStr}` : ""}`;
+  const label = `scoreboard ${leagueId} ${dateStr || "today"}`;
+  const t0 = Date.now();
+  const { data, ms } = await fetchJson(url, label);
+  const events = extractEvents(data, label);
+  const matches = events.filter((e) => e && e.id).map((e) => normalizeEvent(e, leagueId));
+  logger.info("espn", `scoreboard ${leagueId}`, {
+    dates: dateStr || "today",
+    events: events.length,
+    matches: matches.length,
+    ms: Date.now() - t0 || ms
+  });
+  return {
+    data: matches,
+    partial: false,
+    warnings: [],
+    upstream: { requests: 1, failed: 0, events: events.length }
+  };
+}
+
+function getScoreboardDetailed(leagueId = DEFAULT_LEAGUE, dateStr = null) {
+  assertLeague(leagueId);
+  assertDate(dateStr);
+  return readThrough(
+    `v2:sb:${leagueId}:${dateStr || "today"}`,
+    () => loadSingleDay(leagueId, dateStr),
+    dateStr ? TTL.SCOREBOARD : TTL.TODAY
   );
+}
 
-  const matches = results
-    .filter((r) => r.status === "fulfilled")
-    .flatMap((r) => r.value)
+// ---------------------------------------------------------------------------
+// Scoreboard (rango)
+// ---------------------------------------------------------------------------
+
+// TTL de un día suelto según su antigüedad: lo ya jugado casi no cambia, así que
+// el modo "día a día" (caro) se amortiza entre ligas, ventanas y refrescos.
+function dayTtl(day) {
+  const diffDays = Math.round((parseYmd(day) - parseYmd(toYmd(new Date()))) / 86400000);
+  if (diffDays < -1) return 30 * 60 * 1000; // pasado
+  if (diffDays > 1) return 15 * 60 * 1000; // futuro
+  return TTL.SCOREBOARD; // ayer / hoy / mañana
+}
+
+/** Eventos crudos de UN día, cacheados (compartidos por todas las ventanas). */
+function getDayEvents(leagueId, day) {
+  return readThrough(
+    `v2:day:${leagueId}:${day}`,
+    async () => {
+      const label = `scoreboard ${leagueId} ${day}`;
+      const { data } = await fetchJson(`${BASE_URL}/${leagueId}/scoreboard?dates=${day}`, label);
+      return { data: extractEvents(data, label), partial: false, warnings: [] };
+    },
+    TTL.SCOREBOARD,
+    dayTtl(day)
+  );
+}
+
+/** Pide día a día las fechas de una ventana (último recurso). Devuelve { events, requests, errors }. */
+async function fetchPerDay(leagueId, from, to) {
+  const days = enumerateDates(from, to);
+  const results = await Promise.allSettled(days.map((d) => getDayEvents(leagueId, d)));
+  const events = [];
+  const errors = [];
+  let requests = 0;
+  results.forEach((r, i) => {
+    if (r.status === "fulfilled") {
+      events.push(...r.value.data);
+      if (r.value.source === "espn") requests++;
+    } else {
+      requests++;
+      errors.push({ window: days[i], code: r.reason.code, message: r.reason.message, error: r.reason });
+    }
+  });
+  return { events, requests, errors };
+}
+
+// Si ESPN rechaza los RANGOS (400/403) se deja de intentarlos un rato y se va
+// directo día a día. Un 403 en un rango NO activa el freno global (las tablas y
+// "hoy" pueden seguir funcionando); si el día a día también da 403, ahí sí.
+let rangeBypassUntil = 0;
+
+/**
+ * Una ventana (<= RANGE_CHUNK_DAYS días). Refuerza día a día si:
+ *   - ESPN devuelve eventos FUERA de la ventana (ignoró el rango), o
+ *   - ESPN RECHAZA el rango (400/403).
+ */
+async function fetchWindow(leagueId, from, to) {
+  const dates = from === to ? from : `${from}-${to}`;
+  const label = `scoreboard ${leagueId} ${dates}`;
+  const url = `${BASE_URL}/${leagueId}/scoreboard?dates=${dates}`;
+
+  if (from !== to && Date.now() < rangeBypassUntil) {
+    const r = await fetchPerDay(leagueId, from, to);
+    if (r.errors.length > 0 && r.events.length === 0 && r.errors.length === enumerateDates(from, to).length) throw r.errors[0].error;
+    return { ...r, fallback: "per-day" };
+  }
+
+  let data;
+  try {
+    ({ data } = await fetchJson(url, label, { skipBlockDetection: from !== to }));
+  } catch (err) {
+    const st = err.details?.upstreamStatus;
+    if (from !== to && (st === 400 || st === 403)) {
+      rangeBypassUntil = Date.now() + 30 * 60 * 1000;
+      logger.warn("espn", `ESPN rechazó el rango (${st}): se pide día a día durante 30 min`, { league: leagueId, window: dates });
+      const r = await fetchPerDay(leagueId, from, to);
+      if (r.errors.length === r.requests && r.events.length === 0) throw err; // ni día a día respondió
+      return { ...r, requests: r.requests + 1, fallback: "per-day" };
+    }
+    throw err;
+  }
+
+  const events = extractEvents(data, label);
+  if (from !== to && events.some((ev) => !eventInWindow(ev, from, to))) {
+    logger.warn("espn", "ESPN ignoró el rango: se refuerza día a día", { league: leagueId, window: dates, events: events.length });
+    const r = await fetchPerDay(leagueId, from, to);
+    return { ...r, requests: r.requests + 1, fallback: "per-day" };
+  }
+  return { events, requests: 1, errors: [] };
+}
+
+async function loadRange(leagueId, fromStr, toStr) {
+  const t0 = Date.now();
+  const windows = splitRange(fromStr, toStr);
+  const settled = await Promise.allSettled(windows.map(([f, t]) => fetchWindow(leagueId, f, t)));
+
+  const warnings = [];
+  let requests = 0;
+  let failed = 0;
+  const byId = new Map();
+  let rawEvents = 0;
+  let dropped = 0;
+  let fallback = null;
+
+  settled.forEach((r, i) => {
+    const win = `${windows[i][0]}-${windows[i][1]}`;
+    if (r.status === "rejected") {
+      requests += 1;
+      failed += 1;
+      warnings.push({ window: win, code: r.reason.code || "upstream_error", message: r.reason.message });
+      return;
+    }
+    requests += r.value.requests;
+    if (r.value.fallback) fallback = r.value.fallback;
+    failed += r.value.errors.length;
+    r.value.errors.forEach(({ window, code, message }) => warnings.push({ window, code, message }));
+    for (const ev of r.value.events) {
+      rawEvents++;
+      if (!ev || !ev.id) {
+        dropped++;
+        continue;
+      }
+      if (!byId.has(ev.id)) byId.set(ev.id, ev);
+    }
+  });
+
+  const failedWindows = settled.filter((r) => r.status === "rejected").length;
+  if (failedWindows === windows.length) {
+    // Ninguna ventana respondió: es un fallo, no "sin partidos".
+    throw settled[0].reason;
+  }
+
+  const matches = [...byId.values()]
+    .map((ev) => normalizeEvent(ev, leagueId))
     .sort((a, b) => new Date(a.date) - new Date(b.date));
 
-  cache.set(cacheKey, matches, TTL.SCOREBOARD);
-  return matches;
+  const partial = warnings.length > 0;
+  logger.info("espn", `range ${leagueId}`, {
+    dates: `${fromStr}-${toStr}`,
+    windows: windows.length,
+    failedWindows,
+    events: rawEvents,
+    dropped,
+    matches: matches.length,
+    partial,
+    ms: Date.now() - t0
+  });
+
+  return { data: matches, partial, warnings, fallback, upstream: { requests, failed, events: rawEvents } };
 }
 
-/**
- * Genera un array de strings YYYYMMDD entre dos fechas (inclusive).
- * Límite de seguridad: 60 días, para evitar loops gigantes.
- */
-function _enumerateDates(fromStr, toStr) {
-  const parse = (s) => new Date(`${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}T00:00:00Z`);
-  const from = parse(fromStr);
-  const to = parse(toStr);
-  const days = [];
-  const cursor = new Date(from);
-  let safety = 0;
-  while (cursor <= to && safety < 60) {
-    const y = cursor.getUTCFullYear();
-    const m = String(cursor.getUTCMonth() + 1).padStart(2, "0");
-    const d = String(cursor.getUTCDate()).padStart(2, "0");
-    days.push(`${y}${m}${d}`);
-    cursor.setUTCDate(cursor.getUTCDate() + 1);
-    safety++;
+function getScoreboardRangeDetailed(leagueId = DEFAULT_LEAGUE, fromStr, toStr) {
+  assertLeague(leagueId);
+  assertRange(fromStr, toStr);
+  return readThrough(`v2:sb:${leagueId}:${fromStr}-${toStr}`, () => loadRange(leagueId, fromStr, toStr), TTL.SCOREBOARD);
+}
+
+// ---------------------------------------------------------------------------
+// Todas las competiciones
+// ---------------------------------------------------------------------------
+
+/** Combina resultados por liga sin ocultar fallos. Lanza si fallaron todas. */
+function aggregate(settled) {
+  const ok = settled.filter((s) => s.result.status === "fulfilled");
+  const bad = settled.filter((s) => s.result.status === "rejected");
+
+  if (ok.length === 0) {
+    const errors = bad.map((b) => ({
+      league: b.leagueId,
+      code: b.result.reason.code,
+      message: b.result.reason.message
+    }));
+    const sameCode = errors.every((e) => e.code === errors[0].code);
+    throw new ApiError(
+      `No se pudo obtener datos de ninguna competición (ESPN): ${errors[0].message}`,
+      sameCode && errors[0].code === "upstream_timeout" ? 504 : 502,
+      { code: "all_sources_failed", details: { errors } }
+    );
   }
-  return days;
+
+  const warnings = [];
+  const upstream = { requests: 0, failed: 0, events: 0 };
+  const data = [];
+  let partial = bad.length > 0;
+  let anyEspn = false;
+  let anyStale = false;
+
+  for (const b of bad) {
+    warnings.push({ league: b.leagueId, code: b.result.reason.code, message: b.result.reason.message });
+  }
+  for (const o of ok) {
+    const v = o.result.value;
+    data.push(...v.data);
+    if (v.partial) partial = true;
+    if (v.source === "espn") anyEspn = true;
+    if (v.stale) anyStale = true;
+    (v.warnings || []).forEach((w) => warnings.push({ league: o.leagueId, ...w }));
+    upstream.requests += v.upstream?.requests || 0;
+    upstream.failed += v.upstream?.failed || 0;
+    upstream.events += v.upstream?.events || 0;
+  }
+  return {
+    data,
+    partial,
+    warnings,
+    upstream,
+    stale: anyStale,
+    source: anyEspn ? "espn" : anyStale ? "stale" : "cache"
+  };
 }
 
-/**
- * Obtiene partidos de TODAS las competiciones soportadas para una fecha
- * (o el día actual de ESPN si no se especifica).
- */
-async function getAllMatches(dateStr = null) {
-  const cacheKey = `matches:all:${dateStr || "today"}`;
-  const cached = cache.get(cacheKey);
-  if (cached) return cached;
-
-  const results = await Promise.allSettled(
-    COMPETITIONS.map((c) => getScoreboard(c.id, dateStr))
-  );
-
-  const matches = results
-    .filter((r) => r.status === "fulfilled")
-    .flatMap((r) => r.value);
-
-  cache.set(cacheKey, matches, TTL.SCOREBOARD);
-  return matches;
+async function fanOut(fn) {
+  const results = await Promise.allSettled(COMPETITIONS.map((c) => fn(c.id)));
+  return aggregate(COMPETITIONS.map((c, i) => ({ leagueId: c.id, result: results[i] })));
 }
 
-/**
- * Obtiene únicamente los partidos que están EN VIVO ahora mismo,
- * recorriendo todas las competiciones soportadas.
- */
-async function getLiveMatches() {
-  const cacheKey = "matches:live";
-  const cached = cache.get(cacheKey);
-  if (cached) return cached;
-
-  const all = await getAllMatches();
-  const live = all.filter((m) => m.status.isLive);
-
-  cache.set(cacheKey, live, TTL.LIVE);
-  return live;
+async function getAllMatchesDetailed(dateStr = null) {
+  assertDate(dateStr);
+  return fanOut((id) => getScoreboardDetailed(id, dateStr));
 }
 
-/**
- * Obtiene el detalle de un partido específico por su ID de ESPN.
- * Como ESPN no permite buscar por ID sin saber la liga, primero intentamos
- * encontrarlo en el cache de "todos los partidos"; si no aparece ahí,
- * probamos contra cada liga soportada (con cache propio) hasta encontrarlo.
- */
+async function getAllMatchesRangeDetailed(fromStr, toStr) {
+  assertRange(fromStr, toStr);
+  const res = await fanOut((id) => getScoreboardRangeDetailed(id, fromStr, toStr));
+  res.data.sort((a, b) => new Date(a.date) - new Date(b.date));
+  return res;
+}
+
+/** Partidos EN VIVO: se deriva de los scoreboards de hoy (ya cacheados 30 s por liga). */
+async function getLiveMatchesDetailed() {
+  const all = await getAllMatchesDetailed();
+  return { ...all, data: all.data.filter((m) => m.status.isLive) };
+}
+
+// Versiones "solo array" (compatibilidad con código que ya las usaba)
+const getScoreboard = async (l, d) => (await getScoreboardDetailed(l, d)).data;
+const getScoreboardRange = async (l, f, t) => (await getScoreboardRangeDetailed(l, f, t)).data;
+const getAllMatches = async (d) => (await getAllMatchesDetailed(d)).data;
+const getAllMatchesRange = async (f, t) => (await getAllMatchesRangeDetailed(f, t)).data;
+const getLiveMatches = async () => (await getLiveMatchesDetailed()).data;
+
+// ---------------------------------------------------------------------------
+// Detalle de partido: helpers de parseo (sin cambios)
+// ---------------------------------------------------------------------------
+
 // --- Extrae SOLO el nombre del jugador desde la prosa editorial de ESPN
 // para un evento de gol, sin exponer el resto del texto. Formato típico:
 // "Goal! Equipo 1, Equipo 2. Nombre Jugador (Equipo) left footed shot ..."
@@ -343,26 +766,7 @@ function _extractSubPlayers(text) {
   return { playerIn: m[1].trim(), playerOut: m[2].trim() };
 }
 
-async function getMatchById(matchId) {
-  const cacheKey = `match:${matchId}`;
-  const cached = cache.get(cacheKey);
-  if (cached) return cached;
-
-  // 1. Intentar ubicar la liga del partido a partir de los partidos ya cacheados/recientes
-  const all = await getAllMatches();
-  const found = all.find((m) => String(m.id) === String(matchId));
-  const leagueGuess = found ? found.league : null;
-
-  const leaguesToTry = leagueGuess
-    ? [leagueGuess, ...COMPETITIONS.map((c) => c.id).filter((id) => id !== leagueGuess)]
-    : COMPETITIONS.map((c) => c.id);
-
-  for (const leagueId of leaguesToTry) {
-    try {
-      const url = `${BASE_URL}/${leagueId}/summary?event=${matchId}`;
-      const data = await safeGet(url);
-      if (!data || (!data.header && !data.boxscore)) continue;
-
+function buildMatchDetail(data, matchId, leagueId) {
       const header = data.header;
       const competition = header?.competitions?.[0];
       const home = competition?.competitors?.find((c) => c.homeAway === "home");
@@ -489,51 +893,108 @@ async function getMatchById(matchId) {
             }))
           : []
       };
+  return detail;
+}
 
-      cache.set(cacheKey, detail, TTL.MATCH);
-      return detail;
-    } catch (err) {
-      // Probamos con la siguiente liga
-      continue;
-    }
+// ---------------------------------------------------------------------------
+// Detalle de partido
+// ---------------------------------------------------------------------------
+
+/** Busca en los scoreboards ya cacheados la liga de un partido (sin llamar a ESPN). */
+function findLeagueInCache(matchId) {
+  for (const [, payload] of cache.entries("v2:sb:")) {
+    const m = (payload.data || []).find((x) => String(x.id) === String(matchId));
+    if (m) return m.league;
   }
+  return null;
+}
 
-  throw new ApiError(`No se encontró el partido con id ${matchId}`, 404);
+function matchTtl(detail) {
+  if (detail.status?.state === "in") return TTL.MATCH_LIVE;
+  if (detail.status?.completed || detail.status?.state === "post") return TTL.MATCH_FINISHED;
+  return TTL.MATCH_PRE;
 }
 
 /**
- * Obtiene la tabla de posiciones de una liga.
+ * Detalle de un partido. `leagueHint` (query ?league=) evita probar las 8
+ * competiciones. Distingue "no existe" (404) de "ESPN no disponible" (502).
  */
-async function getStandings(leagueId = DEFAULT_LEAGUE) {
-  if (!isValidLeague(leagueId)) {
-    throw new ApiError(`Liga no soportada: ${leagueId}`, 400);
+async function getMatchByIdDetailed(matchId, leagueHint = null) {
+  if (!/^\d{1,20}$/.test(String(matchId))) {
+    throw new ApiError(`Identificador de partido inválido: "${matchId}"`, 400, { code: "invalid_match_id" });
   }
+  if (leagueHint) assertLeague(leagueHint);
 
-  const cacheKey = `standings:${leagueId}`;
-  const cached = cache.get(cacheKey);
-  if (cached) return cached;
+  const key = `v2:match:${matchId}`;
+  const hit = cache.get(key);
+  if (hit) return { ...hit, source: "cache", stale: false };
 
-  const url = `${BASE_URL}/${leagueId}/standings`;
-  const data = await safeGet(url);
+  return cache.once(key, async () => {
+    const guess = leagueHint || findLeagueInCache(matchId);
+    const order = guess
+      ? [guess, ...COMPETITIONS.map((c) => c.id).filter((id) => id !== guess)]
+      : COMPETITIONS.map((c) => c.id);
 
-  // La estructura de standings de ESPN suele venir anidada en children/groups
+    const failures = [];
+    for (const leagueId of order) {
+      try {
+        const { data } = await fetchJson(
+          `${BASE_URL}/${leagueId}/summary?event=${matchId}`,
+          `summary ${leagueId} event=${matchId}`
+        );
+        if (!data.header && !data.boxscore) continue; // esa liga no tiene el partido
+        const detail = buildMatchDetail(data, matchId, leagueId);
+        const payload = { data: detail, partial: false, warnings: [], upstream: { requests: 1, failed: 0, events: 0 } };
+        cache.set(key, payload, matchTtl(detail));
+        logger.info("espn", `summary ${leagueId}`, {
+          event: matchId,
+          keyEvents: detail.keyEvents.length,
+          stats: detail.statistics.length,
+          lineups: detail.lineups.length,
+          viaHint: leagueId === guess
+        });
+        return { ...payload, source: "espn", stale: false };
+      } catch (err) {
+        // 404 = esa liga no tiene el partido; cualquier otro error es un fallo real
+        if (err.code !== "upstream_not_found") failures.push({ league: leagueId, code: err.code, message: err.message });
+      }
+    }
+
+    const stale = cache.getStale(key);
+    if (stale && failures.length) {
+      return { ...stale.value, source: "stale", stale: true, partial: true, warnings: failures };
+    }
+    if (failures.length) {
+      throw new ApiError(
+        `No se pudo consultar ESPN para el partido ${matchId}: ${failures[0].message}`,
+        502,
+        { code: "upstream_unavailable", details: { errors: failures.slice(0, 3) } }
+      );
+    }
+    throw new ApiError(`No se encontró el partido con id ${matchId}`, 404, { code: "match_not_found" });
+  });
+}
+
+const getMatchById = async (id, hint) => (await getMatchByIdDetailed(id, hint)).data;
+
+// ---------------------------------------------------------------------------
+// Standings
+// ---------------------------------------------------------------------------
+
+function parseStandings(data) {
   let entries = [];
-
   if (data.standings?.entries) {
     entries = data.standings.entries.map((e) => ({ ...e, __group: null }));
   } else if (Array.isArray(data.children)) {
-    // Algunas ligas (ej. con grupos/conferencias, como el Mundial) anidan los standings aquí
+    // Ligas con grupos/conferencias (y el formato de /apis/v2) anidan aquí
     data.children.forEach((child) => {
       if (child.standings?.entries) {
-        const groupName = child.name || child.abbreviation || null;
-        entries = entries.concat(
-          child.standings.entries.map((e) => ({ ...e, __group: groupName }))
-        );
+        const groupName = data.children.length > 1 ? child.name || child.abbreviation || null : null;
+        entries = entries.concat(child.standings.entries.map((e) => ({ ...e, __group: groupName })));
       }
     });
   }
-
-  const table = entries.map((entry) => {
+  return entries.map((entry) => {
     const stats = {};
     (entry.stats || []).forEach((s) => {
       stats[s.name] = s.value;
@@ -554,19 +1015,66 @@ async function getStandings(leagueId = DEFAULT_LEAGUE) {
       points: stats.points ?? null
     };
   });
-
-  cache.set(cacheKey, table, TTL.STANDINGS);
-  return table;
 }
 
-/**
- * Lista estática de competiciones soportadas (no requiere request externo).
- */
+async function loadStandings(leagueId) {
+  // 1º el endpoint que sí trae la tabla (/apis/v2); 2º el /apis/site/v2 por si ESPN lo completa.
+  const candidates = [
+    { name: "v2", url: `${STANDINGS_V2_BASE_URL}/${leagueId}/standings` },
+    { name: "site", url: `${BASE_URL}/${leagueId}/standings` }
+  ];
+  const errors = [];
+  let answered = 0;
+  for (const c of candidates) {
+    try {
+      const { data } = await fetchJson(c.url, `standings ${leagueId} (${c.name})`);
+      answered++;
+      const table = parseStandings(data);
+      logger.info("espn", `standings ${leagueId}`, { endpoint: c.name, rows: table.length });
+      if (table.length > 0) {
+        return { data: table, partial: false, warnings: [], upstream: { requests: answered + errors.length, failed: errors.length, events: 0 } };
+      }
+    } catch (err) {
+      errors.push({ endpoint: c.name, code: err.code, message: err.message });
+    }
+  }
+  if (answered === 0) {
+    throw new ApiError(`No se pudo consultar la tabla de ${leagueId}: ${errors[0].message}`, 502, {
+      code: "upstream_unavailable",
+      details: { errors }
+    });
+  }
+  // ESPN respondió bien pero sin filas.
+  if (isMainLeague(leagueId)) {
+    throw new ApiError(`ESPN respondió sin tabla de posiciones para ${leagueId}`, 502, {
+      code: "standings_empty",
+      details: { errors }
+    });
+  }
+  return { data: [], partial: false, warnings: [], upstream: { requests: answered, failed: errors.length, events: 0 } };
+}
+
+function getStandingsDetailed(leagueId = DEFAULT_LEAGUE) {
+  assertLeague(leagueId);
+  return readThrough(`v2:standings:${leagueId}`, () => loadStandings(leagueId), TTL.STANDINGS);
+}
+const getStandings = async (l) => (await getStandingsDetailed(l)).data;
+
+/** Lista estática de competiciones soportadas (no requiere request externo). */
 function getCompetitions() {
   return COMPETITIONS;
 }
 
 module.exports = {
+  // Con metadatos (usadas por las rutas)
+  getScoreboardDetailed,
+  getScoreboardRangeDetailed,
+  getAllMatchesDetailed,
+  getAllMatchesRangeDetailed,
+  getLiveMatchesDetailed,
+  getMatchByIdDetailed,
+  getStandingsDetailed,
+  // Solo datos (contrato anterior)
   getScoreboard,
   getScoreboardRange,
   getAllMatches,
@@ -574,5 +1082,7 @@ module.exports = {
   getLiveMatches,
   getMatchById,
   getStandings,
-  getCompetitions
+  getCompetitions,
+  // Exportadas para pruebas
+  _internal: { splitRange, assertRange, parseYmd, parseStandings, resetBreaker: () => { blockedUntil = 0; blockStrikes = 0; rangeBypassUntil = 0; } }
 };

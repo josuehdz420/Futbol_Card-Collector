@@ -248,7 +248,7 @@ const Exchange = {
             <div style="font-family:'Bebas Neue',cursive;font-size:0.95rem;color:var(--text-primary);letter-spacing:1px">
               ${fig.name}
             </div>
-            <div style="font-size:0.6rem;color:var(--text-muted)">${fig.flag||''} ${fig.team}</div>
+            <div style="font-size:0.6rem;color:var(--text-muted)">${fig.team}</div>
           </div>
           <div style="position:absolute;top:4px;right:4px;
                       background:${color};color:#080c14;
@@ -262,7 +262,7 @@ const Exchange = {
           ${fig.name}
         </h3>
         <p style="color:var(--text-secondary);font-size:0.85rem;margin:0.25rem 0">
-          ${fig.flag||''} ${fig.team}
+          ${fig.team}
         </p>
         <div style="display:inline-block;background:${color}22;border:1px solid ${color}55;
                     color:${color};font-size:0.7rem;padding:2px 8px;border-radius:12px;

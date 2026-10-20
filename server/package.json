@@ -1,12 +1,14 @@
 {
-  "name": "worldcup-server",
+  "name": "club-collector-server",
   "version": "1.0.0",
-  "description": "Backend Express (CommonJS) basado en endpoints públicos de ESPN para datos de fútbol.",
+  "description": "Backend Express (CommonJS) basado en endpoints públicos de ESPN para datos de fútbol de clubes (La Liga, Premier League, Champions League).",
   "main": "server.js",
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch server.js",
+    "test": "node --test test/api.test.js test/frontend.test.js",
+    "diagnose": "node scripts/diagnose-espn.js"
   },
   "dependencies": {
     "axios": "^1.7.7",

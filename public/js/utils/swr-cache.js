@@ -138,7 +138,10 @@ const Cache = {
     const cached = this._mem[key];
 
     if (cached) {
-      const stale = (Date.now() - cached.ts) > ttl;
+      // Un array vacío cacheado nunca se considera "fresco": podría ser el
+      // residuo de un fallo transitorio; se sirve al instante pero se revalida.
+      const emptyList = Array.isArray(cached.data) && cached.data.length === 0;
+      const stale = emptyList || (Date.now() - cached.ts) > ttl;
       if (stale || opts.forceNetwork) {
         this._revalidate(key, fetcher); // en background, no se espera
       }

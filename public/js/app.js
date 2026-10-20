@@ -545,9 +545,9 @@ const App = {
 
     bar.style.display = 'flex';
 
-    if (source === 'mock') {
+    if (source === 'mock' || source === 'sin_datos') {
       bar.className = 'api-status-bar api-status-mock';
-      bar.innerHTML = `<span>⚠️ Datos de muestra (Mock) — El Mundial 2026 aún no ha comenzado</span>`;
+      bar.innerHTML = `<span>⚠️ Sin datos disponibles en este momento. Intenta actualizar en unos minutos.</span>`;
     } else if (source === 'hourly_limit') {
       bar.className = 'api-status-bar api-status-mock';
       const maxPerHour = typeof _AF_DEFAULT_MAX_PER_HOUR !== 'undefined' ? _AF_DEFAULT_MAX_PER_HOUR : 10;
@@ -763,7 +763,7 @@ const App = {
         ${photoSection}
         <div class="fig-info">
           <div class="figurita-name">${f.name}</div>
-          <div class="figurita-team">${f.flag || ''} ${f.team}</div>
+          <div class="figurita-team">${f.team}</div>
           <div class="fig-footer">
             <span class="figurita-pos">${f.pos}</span>
           </div>

@@ -14,14 +14,14 @@
 
 const MatchDetail = {
 
-  async open(matchId, basicMatch = null) {
+  async open(matchId, basicMatch = null, leagueHint = null) {
     if (!matchId) return;
 
     Modal.open(this._renderLoading(basicMatch));
 
     let detail = null;
     try {
-      detail = await API.getMatchDetail(matchId);
+      detail = await API.getMatchDetail(matchId, leagueHint || basicMatch?.league || null);
     } catch (err) {
       console.error('[MatchDetail] falló al cargar', matchId, err);
     }
@@ -66,9 +66,9 @@ const MatchDetail = {
         <div class="md-header">
           <p class="md-venue">${basic.competition || ''}</p>
           <div class="md-score-row">
-            <div class="md-team-name home">${basic.home || ''} ${basic.homeFlag || ''}</div>
+            <div class="md-team-name home">${basic.home || ''} ${basic.homeCrest ? `<img src="${basic.homeCrest}" alt="" referrerpolicy="no-referrer" style="width:18px;height:18px;object-fit:contain;vertical-align:-3px" onerror="this.remove()">` : ''}</div>
             <div class="md-score" style="font-size:1rem;letter-spacing:0">vs</div>
-            <div class="md-team-name away">${basic.awayFlag || ''} ${basic.away || ''}</div>
+            <div class="md-team-name away">${basic.awayCrest ? `<img src="${basic.awayCrest}" alt="" referrerpolicy="no-referrer" style="width:18px;height:18px;object-fit:contain;vertical-align:-3px" onerror="this.remove()">` : ''} ${basic.away || ''}</div>
           </div>
         </div>
         <p class="md-empty" style="padding-top:0.5rem">Cargando estadísticas y alineaciones…</p>
@@ -531,11 +531,11 @@ const MatchDetail = {
     return `
       <div class="md-wrap">
         <div class="md-header">
-          <p class="md-venue">${d.venue || ''}</p>
+          <p class="md-venue">${d.competition || ''}${d.venue ? ' · '+d.venue : ''}</p>
           <div class="md-score-row">
-            <div class="md-team-name home">${d.home} ${d.homeFlag}</div>
+            <div class="md-team-name home">${d.home} ${d.homeCrest ? `<img src="${d.homeCrest}" alt="" referrerpolicy="no-referrer" style="width:18px;height:18px;object-fit:contain;vertical-align:-3px" onerror="this.remove()">` : ''}</div>
             <div class="md-score">${scoreShown ? `${d.scoreHome} - ${d.scoreAway}` : 'vs'}</div>
-            <div class="md-team-name away">${d.awayFlag} ${d.away}</div>
+            <div class="md-team-name away">${d.awayCrest ? `<img src="${d.awayCrest}" alt="" referrerpolicy="no-referrer" style="width:18px;height:18px;object-fit:contain;vertical-align:-3px" onerror="this.remove()">` : ''} ${d.away}</div>
           </div>
           ${d.phase ? `<p class="md-phase" style="color:${this._phaseColor(d)}">${d.status === 'live' ? '🔴 ' : ''}${d.phase}</p>` : ''}
         </div>

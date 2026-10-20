@@ -1,5 +1,5 @@
 ---
-// Página de Login — World Cup Collector UES
+// Página de Login — Club Collector UES
 ---
 <!DOCTYPE html>
 <html lang="es">
@@ -11,10 +11,10 @@
   <link rel="apple-touch-icon" href="/Futbol_Card-Collector/icons/icon-192.png"/>
   <meta name="theme-color" content="#080c14"/>
   <meta name="apple-mobile-web-app-capable" content="yes"/>
-  <title>Fifa World Cup Coleccion — UES · Login</title>
+  <title>Club Collector — UES · Login</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow:wght@300;400;600;700&family=Barlow+Condensed:wght@400;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/Futbol_Card-Collector/css/worldcup2026-theme.css"/>
+  <link rel="stylesheet" href="/Futbol_Card-Collector/css/club-theme.css"/>
   <link rel="stylesheet" href="/Futbol_Card-Collector/css/auth.css"/>
   <style>
     .file-drop {
@@ -151,7 +151,7 @@
   <div class="auth-container">
     <div class="auth-logo">
       <img src="/Futbol_Card-Collector/icons/icon-192.png" class="logo-icon" style="width:72px;height:72px;border-radius:50%;object-fit:cover;" alt="WCC Logo"/>
-      <h1 class="logo-title">FIFA WORLD CUP<br><span>COLECCION</span></h1>
+      <h1 class="logo-title">CLUB COLLECTOR<br><span>UES</span></h1>
       <p class="logo-sub">Universidad de El Salvador</p>
     </div>
 
@@ -171,7 +171,7 @@
         <span class="input-error" id="login-pass-err"></span>
       </div>
       <button class="btn btn-primary btn-loading" id="btn-login">
-        <span class="btn-text">Entrar al Mundial</span>
+        <span class="btn-text">Entrar</span>
         <span class="btn-spinner" style="display:none">⏳</span>
       </button>
       <p class="auth-switch">¿No tienes cuenta? <a href="#" id="go-register">Regístrate</a></p>
@@ -413,18 +413,18 @@
     const TUTORIAL_STEPS = [
       {
         icon: '⚽',
-        title: '¡Bienvenido al Mundial!',
-        text: 'World Cup Collector UES es tu app para vivir la Copa Mundial 2026: colecciona figuritas, predice partidos y gana recompensas mientras sigues cada detalle del torneo.'
+        title: '¡Bienvenido!',
+        text: 'Club Collector UES es tu app para seguir La Liga, la Premier League y la Champions League: colecciona figuritas, predice partidos y gana recompensas mientras sigues cada detalle de la temporada.'
       },
       {
         icon: '🎁',
         title: 'Sobres y Álbum',
-        text: 'En "Gacha" abres sobres usando tus tiradas para conseguir figuritas de selecciones y jugadores. Guárdalas en tu "Álbum" y marca tus favoritas.'
+        text: 'En "Gacha" abres sobres usando tus tiradas para conseguir figuritas de jugadores de los grandes clubes. Guárdalas en tu "Álbum" y marca tus favoritas.'
       },
       {
         icon: '📊',
         title: 'Seguimiento y En Vivo',
-        text: 'En "Seguimiento" revisa estadísticas, grupos y la tabla de posiciones. En "En Vivo" sigue los partidos del Mundial en tiempo real.'
+        text: 'En "Seguimiento" revisa estadísticas, equipos y las tablas de posiciones. En "En Vivo" sigue los partidos en tiempo real.'
       },
       {
         icon: '🔮',
